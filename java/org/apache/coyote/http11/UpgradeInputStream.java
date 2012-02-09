@@ -14,36 +14,42 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.catalina.websocket;
+package org.apache.coyote.http11;
 
 import java.io.IOException;
 import java.io.InputStream;
 
-public class WsInputStream extends java.io.InputStream {
+import org.apache.coyote.InputBuffer;
+import org.apache.tomcat.util.buf.ByteChunk;
+import org.apache.tomcat.util.buf.ByteChunk.ByteInputChannel;
 
-    private InputStream wrapped;
-    private byte[] mask;
-    private long remaining;
-    private long read;
+/**
+ * Provides a buffered {@link InputStream} to read data from the upgraded
+ * connection.
+ *
+ * TODO: Override a few more {@link InputStream} methods for efficiency.
+ *
+ * Based on a combination of {@link org.apache.catalina.connector.InputBuffer}
+ * and (@link CoyoteInputStream}.
+ */
+public class UpgradeInputStream extends InputStream
+        implements ByteInputChannel {
 
-    public WsInputStream(InputStream wrapped, byte[] mask, long remaining) {
-        this.wrapped = wrapped;
-        this.mask = mask;
-        this.remaining = remaining;
-        this.read = 0;
+    private InputBuffer ib = null;
+    private ByteChunk bb = new ByteChunk(8192);
+
+    public UpgradeInputStream(InputBuffer ib) {
+        this.ib = ib;
+        bb.setByteInputChannel(this);
     }
 
     @Override
     public int read() throws IOException {
-        if (remaining == 0) {
-            return -1;
-        }
-
-        remaining--;
-        read++;
-
-        int masked = wrapped.read();
-        return masked ^ mask[(int) ((read - 1) % 4)];
+        return bb.substract();
     }
 
+    @Override
+    public int realReadBytes(byte[] cbuf, int off, int len) throws IOException {
+        return ib.doRead(bb, null);
+    }
 }

@@ -19,7 +19,6 @@ package org.apache.coyote;
 import java.io.IOException;
 import java.util.concurrent.Executor;
 
-import org.apache.coyote.http11.upgrade.UpgradeInbound;
 import org.apache.tomcat.util.net.AbstractEndpoint;
 import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
 import org.apache.tomcat.util.net.SocketStatus;
@@ -32,19 +31,11 @@ import org.apache.tomcat.util.net.SocketWrapper;
 public abstract class AbstractProcessor<S> implements ActionHook, Processor {
 
     protected Adapter adapter;
-    protected AsyncStateMachine asyncStateMachine;
-    protected AbstractEndpoint endpoint;
-    protected Request request;
-    protected Response response;
+    protected final AsyncStateMachine asyncStateMachine;
+    protected final AbstractEndpoint endpoint;
+    protected final Request request;
+    protected final Response response;
 
-
-    /**
-     * Intended for use by the Upgrade sub-classes that have no need to
-     * initialise the request, response, etc.
-     */
-    protected AbstractProcessor() {
-        // NOOP
-    }
 
     public AbstractProcessor(AbstractEndpoint endpoint) {
         this.endpoint = endpoint;
@@ -105,7 +96,7 @@ public abstract class AbstractProcessor<S> implements ActionHook, Processor {
 
 
     public boolean isAsync() {
-        return (asyncStateMachine != null && asyncStateMachine.isAsync());
+        return asyncStateMachine.isAsync();
     }
 
 
@@ -140,6 +131,4 @@ public abstract class AbstractProcessor<S> implements ActionHook, Processor {
      * upgrade.
      */
     public abstract SocketState upgradeDispatch() throws IOException;
-
-    public abstract UpgradeInbound getUpgradeInbound();
 }

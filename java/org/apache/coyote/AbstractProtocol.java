@@ -16,7 +16,6 @@
  */
 package org.apache.coyote;
 
-import java.io.IOException;
 import java.net.InetAddress;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -29,7 +28,6 @@ import javax.management.MBeanServer;
 import javax.management.MalformedObjectNameException;
 import javax.management.ObjectName;
 
-import org.apache.coyote.http11.upgrade.UpgradeInbound;
 import org.apache.juli.logging.Log;
 import org.apache.tomcat.util.ExceptionUtils;
 import org.apache.tomcat.util.modeler.Registry;
@@ -578,18 +576,9 @@ public abstract class AbstractProtocol implements ProtocolHandler,
                     // closed. If it works, the socket will be re-added to the
                     // poller
                     release(socket, processor, false, false);
-                } else if (state == SocketState.UPGRADED) {
+                } else if (state == SocketState.UPGRADE) {
                     // Need to keep the connection associated with the processor
-                    upgradePoll(socket, processor);
-                } else if (state == SocketState.UPGRADING) {
-                    // Get the UpgradeInbound handler
-                    UpgradeInbound inbound = processor.getUpgradeInbound();
-                    // Release the Http11 processor to be re-used
-                    release(socket, processor, false, false);
-                    // Create the light-weight upgrade processor
-                    processor = createUpgradeProcessor(socket, inbound);
-                    // Need to keep the connection associated with the processor
-                    upgradePoll(socket, processor);
+                    longPoll(socket, processor);
                 } else {
                     // Connection closed. OK to recycle the processor.
                     release(socket, processor, true, false);
@@ -621,12 +610,9 @@ public abstract class AbstractProtocol implements ProtocolHandler,
         protected abstract P createProcessor();
         protected abstract void initSsl(SocketWrapper<S> socket, P processor);
         protected abstract void longPoll(SocketWrapper<S> socket, P processor);
-        protected abstract void upgradePoll(SocketWrapper<S> socket,
-                P processor);
         protected abstract void release(SocketWrapper<S> socket, P processor,
                 boolean socketClosing, boolean addToPoller);
-        protected abstract P createUpgradeProcessor(SocketWrapper<S> socket,
-                UpgradeInbound inbound) throws IOException;
+
 
         protected void register(AbstractProcessor<S> processor) {
             if (getProtocol().getDomain() != null) {
@@ -659,12 +645,8 @@ public abstract class AbstractProtocol implements ProtocolHandler,
             if (getProtocol().getDomain() != null) {
                 synchronized (this) {
                     try {
-                        Request r = processor.getRequest();
-                        if (r == null) {
-                            // Probably an UpgradeProcessor
-                            return;
-                        }
-                        RequestInfo rp = r.getRequestProcessor();
+                        RequestInfo rp =
+                            processor.getRequest().getRequestProcessor();
                         rp.setGlobalProcessor(null);
                         ObjectName rpName = rp.getRpName();
                         if (getLog().isDebugEnabled()) {

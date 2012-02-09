@@ -14,36 +14,33 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.catalina.websocket;
+package org.apache.coyote.http11;
 
 import java.io.IOException;
-import java.io.InputStream;
+import java.io.OutputStream;
 
-public class WsInputStream extends java.io.InputStream {
+/**
+ * Allows data to be written to the upgraded connection.
+ *
+ * TODO: Move this to a more appropriate package (TBD).
+ *
+ * TODO: Override more methods for efficiency.
+ */
+public class UpgradeOutbound extends OutputStream {
 
-    private InputStream wrapped;
-    private byte[] mask;
-    private long remaining;
-    private long read;
+    @Override
+    public void flush() throws IOException {
+        os.flush();
+    }
 
-    public WsInputStream(InputStream wrapped, byte[] mask, long remaining) {
-        this.wrapped = wrapped;
-        this.mask = mask;
-        this.remaining = remaining;
-        this.read = 0;
+    private OutputStream os;
+
+    public UpgradeOutbound(OutputStream os) {
+        this.os = os;
     }
 
     @Override
-    public int read() throws IOException {
-        if (remaining == 0) {
-            return -1;
-        }
-
-        remaining--;
-        read++;
-
-        int masked = wrapped.read();
-        return masked ^ mask[(int) ((read - 1) % 4)];
+    public void write(int b) throws IOException {
+        os.write(b);
     }
-
 }

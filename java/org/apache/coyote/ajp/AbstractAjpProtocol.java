@@ -17,7 +17,6 @@
 package org.apache.coyote.ajp;
 
 import org.apache.coyote.AbstractProtocol;
-import org.apache.coyote.http11.upgrade.UpgradeInbound;
 import org.apache.tomcat.util.net.SocketWrapper;
 import org.apache.tomcat.util.res.StringManager;
 
@@ -86,18 +85,6 @@ public abstract class AbstractAjpProtocol extends AbstractProtocol {
             // Same requirements for all AJP connectors
             connections.put(socket.getSocket(), processor);
             socket.setAsync(true);
-        }
-
-        @Override
-        protected void upgradePoll(SocketWrapper<S> socket, P processor) {
-            // TODO Should never happen. ISE?
-        }
-
-        @Override
-        protected P createUpgradeProcessor(SocketWrapper<S> socket,
-                UpgradeInbound inbound) {
-            // TODO should fail - throw IOE
-            return null;
         }
     }
 }
