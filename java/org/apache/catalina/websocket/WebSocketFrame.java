@@ -425,6 +425,16 @@ public class WebSocketFrame {
         return opcode.equals(OpCode.Binary) || opcode.equals(OpCode.Text);
     }
     
+    /**
+     * Finds out whether this frame is a control frame. 
+     * @return true iff this frame is a control frame
+     */
+    public boolean isControl() {
+        return opcode.equals(OpCode.ConnectionClose) || 
+                opcode.equals(OpCode.Ping) || 
+                opcode.equals(OpCode.Pong);
+    }
+    
     public long getPayloadLength() {
         return payloadLength;
     }
