@@ -1,8 +1,14 @@
 package org.apache.catalina.websocket;
 
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.nio.ByteBuffer;
+
+import org.apache.catalina.util.Conversions;
+import org.apache.coyote.http11.upgrade.UpgradeProcessor;
+import org.apache.tomcat.util.buf.B2CConverter;
 
 
 /* 
@@ -61,7 +67,7 @@ public class WebSocketFrame {
     /**
      * Size of the payload
      */
-    private int payloadLength;
+    private long payloadLength;
 
     /**
      * If the payload (data) is masked, it needs to be XORed (in a special way)
@@ -128,6 +134,68 @@ public class WebSocketFrame {
         }
     }
 
+    public static WebSocketFrame decode(UpgradeProcessor<?> processor) throws IOException {
+        // Read the first byte
+        int i = processor.read();
+
+        boolean fin = (i & 0x80) > 0;
+
+        boolean rsv1 = (i & 0x40) > 0;
+        boolean rsv2 = (i & 0x20) > 0;
+        boolean rsv3 = (i & 0x10) > 0;
+
+        if (rsv1 || rsv2 || rsv3) {
+            // TODO: Not supported.
+        }
+
+        OpCode opCode = OpCode.getOpCodeByNumber((i & 0x0F));
+        validateOpCode(opCode);
+        
+        // Read the next byte
+        i = processor.read();
+        
+        boolean mask = (i & 0x80) == 0;
+        if (!mask) {
+            // Client data must be masked and this isn't
+            // TODO: Better message
+            throw new IOException();
+        }
+        
+        long payloadLength = i & 0x7F;
+        if (payloadLength == 126) {
+            byte[] extended = new byte[2];
+            processor.read(extended);
+            payloadLength = Conversions.byteArrayToLong(extended);
+        } else if (payloadLength == 127) {
+            byte[] extended = new byte[8];
+            processor.read(extended);
+            payloadLength = Conversions.byteArrayToLong(extended);
+        }
+
+        byte[] maskingKey = new byte[4];
+        processor.read(maskingKey);
+        
+        WebSocketFrame frame = new WebSocketFrame(fin, opCode, mask,
+                payloadLength, maskingKey);
+        
+        return frame;
+    }
+    
+    private static void validateOpCode(OpCode opCode) throws IOException {
+        switch (opCode) {
+        case Continuation:
+        case Text:
+        case Binary:
+        case ConnectionClose:
+        case Ping:
+        case Pong:
+            break;
+        default:
+            // TODO: Message
+            throw new IOException();
+        }
+    }
+    
     /**
      * Encodes contents of this frame into bytes stored in ByteBuffer
      * 
@@ -226,6 +294,24 @@ public class WebSocketFrame {
     }
     
     /**
+     * Constructor without maskingKey for creating new frames to be encoded.
+     *
+     * @param fin
+     *            whether FIN bit should be set
+     * @param opcode
+     *            type of frame
+     * @param mask
+     *            whether this frame is masked
+     * @param payloadLength
+     *            payload size (capacity of the data buffer)
+     */
+    public WebSocketFrame(boolean fin, OpCode opcode, long payloadLength) {
+        this.fin = fin;
+        this.opcode = opcode;
+        this.payloadLength = payloadLength;
+    }
+    
+    /**
      * Constructor without data, they are to be specified later or left blank
      * 
      * @param fin
@@ -240,15 +326,10 @@ public class WebSocketFrame {
      *            for unmasking data (if mask==true)
      */
     public WebSocketFrame(boolean fin, OpCode opcode, boolean mask,
-            int payloadLength, byte[] maskingKey) {
-        this(fin, opcode, mask, payloadLength, maskingKey, ByteBuffer
-                .allocate(payloadLength));
-        /* TODO: allocating a whole buffer to the size of the payload will
-         * fail if we are going to support large payloads above 64KB!
-         * We'll need an option for the data to not be part of this frame object
-         * Streaming API probably. */
+            long payloadLength, byte[] maskingKey) {
+        this(fin, opcode, mask, payloadLength, maskingKey, null);
     }
-
+    
     /**
      * Constructor for setting every aspect of the frame
      * 
@@ -264,7 +345,7 @@ public class WebSocketFrame {
      *            for unmasking data (if mask==true)
      */
     public WebSocketFrame(boolean fin, OpCode opcode, boolean mask,
-            int payloadLength, byte[] maskingKey, ByteBuffer data) {
+            long payloadLength, byte[] maskingKey, ByteBuffer data) {
         this.fin = fin;
         this.opcode = opcode;
         this.mask = mask;
@@ -288,11 +369,11 @@ public class WebSocketFrame {
      * 
      * @return independent WebSocketFrame instance
      */
-    @Override
+    /*@Override
     protected WebSocketFrame clone() {
         return new WebSocketFrame(fin, opcode, mask, payloadLength, maskingKey,
                 data.duplicate());
-    }
+    }*/
 
     /**
      * @return Whether this frame is the final frame.
@@ -337,11 +418,18 @@ public class WebSocketFrame {
         this.mask = mask;
     }
 
-    public int getPayloadLength() {
+    /**
+     * @return true iff this frame contains binary or text data
+     */
+    public boolean isData() {
+        return opcode.equals(OpCode.Binary) || opcode.equals(OpCode.Text);
+    }
+    
+    public long getPayloadLength() {
         return payloadLength;
     }
 
-    public void setPayloadLength(int payloadLength) {
+    public void setPayloadLength(long payloadLength) {
         this.payloadLength = payloadLength;
     }
 
