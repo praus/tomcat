@@ -77,7 +77,7 @@ public abstract class StreamInbound implements UpgradeInbound {
     		if (frame.getOpcode()==OpCode.Continuation){
 //    			TODO: protocol error
     		}
-    		if (frame.isControl() && frame.isFin()){
+    		if (frame.isControl() && !frame.isFin()){
 //    			TODO: protocol error    			
     		}
     		
