@@ -17,6 +17,8 @@
 package org.apache.catalina.websocket;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.Reader;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 
@@ -41,6 +43,24 @@ public class WsOutbound {
         // can always we written into Byte buffer
         this.bb = ByteBuffer.allocate(DEFAULT_BUFFER_SIZE * 4);
         this.cb = CharBuffer.allocate(DEFAULT_BUFFER_SIZE);
+    }
+    
+    public void writeBinaryStream(InputStream stream) throws IOException {
+    	int i;
+    	while((i = stream.read()) != -1)
+    	{
+    		writeBinaryData(i);
+    	}
+    	flush();
+    }
+    
+    public void writeTextStream(Reader reader) throws IOException {
+        int i;
+        while((i = reader.read()) != -1)
+        {
+            writeTextData((char) i);
+        }
+        flush();
     }
 
 
