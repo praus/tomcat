@@ -27,20 +27,22 @@ import org.apache.coyote.http11.upgrade.UpgradeOutbound;
 import org.apache.coyote.http11.upgrade.UpgradeProcessor;
 import org.apache.tomcat.util.buf.B2CConverter;
 import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
+import org.apache.catalina.websocket.WebSocketFrame.OpCode;
 
 public abstract class StreamInbound implements UpgradeInbound {
 
     // These attributes apply to the current frame being processed
-    private boolean fin = true;
-    private boolean rsv1 = false;
-    private boolean rsv2 = false;
-    private boolean rsv3 = false;
-    private int opCode = -1;
-    private long payloadLength = -1;
+//    private boolean fin = true;
+//    private boolean rsv1 = false;
+//    private boolean rsv2 = false;
+//    private boolean rsv3 = false;
+//    private int opCode = -1;
+//    private long payloadLength = -1;
 
     // These attributes apply to the message that may be spread over multiple
     // frames
-    // TODO
+    private boolean continued = false;
+    private OpCode messageDataType;
 
     private UpgradeProcessor<?> processor = null;
     private WsOutbound outbound;
@@ -62,75 +64,104 @@ public abstract class StreamInbound implements UpgradeInbound {
 
     @Override
     public SocketState onData() throws IOException {
-        // Must be start the start of a frame
+        // Must be the start of a frame
+    	
+    	
+    	WebSocketFrame frame = WebSocketFrame.decode(processor);
+	
+    	if (!continued){
+//        	beginning frame of a message: allowed combinations
+//    		Text/Binary + Fin1/Fin0
+//			Control + Fin1
+    		
+    		if (frame.getOpcode()==OpCode.Continuation){
+//    			TODO: protocol error
+    		}
+    		if (frame.isControl() && frame.isFin()){
+//    			TODO: protocol error    			
+    		}
+    		
+    	} else {
+//        	middle frame of a message: allowed combinations
+//    		Continuation + Fin0
+//    		Continuation + Fin1
+//    		Control + Fin0 (inserted inside, if not, previous frame would have Fin1)
+    		switch(frame.getOpcode()){
+    			case Ping:
+    			case Pong:
+    			case ConnectionClose:
+    				if (frame.isFin()){
+//    	    			TODO: protocol error
+    				}
+    				break;
+    			case Text:
+    			case Binary:
+//    				TODO: protocol error
+    				break;
+    			case Continuation:
+    				frame.setOpcode(messageDataType);
+    				break;
+    		}
+    		
+    	}
+		setContinued(frame);
+		if(frame.isData()){
+			handleDataFrame(frame);
+		}else if(frame.isControl()){
+			handleControl(frame);
+		}
 
-        // Read the first byte
-        int i = processor.read();
-
-        fin = (i & 0x80) > 0;
-
-        rsv1 = (i & 0x40) > 0;
-        rsv2 = (i & 0x20) > 0;
-        rsv3 = (i & 0x10) > 0;
-
-        if (rsv1 || rsv2 || rsv3) {
-            // TODO: Not supported.
-        }
-
-        opCode = (i & 0x0F);
-        validateOpCode(opCode);
-
-        // Read the next byte
-        i = processor.read();
-
-        // Client data must be masked and this isn't
-        if ((i & 0x80) == 0) {
-            // TODO: Better message
-            throw new IOException();
-        }
-
-        payloadLength = i & 0x7F;
-        if (payloadLength == 126) {
-            byte[] extended = new byte[2];
-            processor.read(extended);
-            payloadLength = Conversions.byteArrayToLong(extended);
-        } else if (payloadLength == 127) {
-            byte[] extended = new byte[8];
-            processor.read(extended);
-            payloadLength = Conversions.byteArrayToLong(extended);
-        }
-
-        byte[] mask = new byte[4];
-        processor.read(mask);
-
-        if (opCode == 1 || opCode == 2) {
-            WsInputStream wsIs = new WsInputStream(processor, mask,
-                    payloadLength);
-            if (opCode == 2) {
-                onBinaryData(wsIs);
-            } else {
-                InputStreamReader r =
-                        new InputStreamReader(wsIs, B2CConverter.UTF_8);
-                onTextData(r);
-            }
-        }
-
-        // TODO: Doesn't currently handle multi-frame messages. That will need
-        //       some refactoring.
 
         // TODO: Per frame extension handling is not currently supported.
 
-        // TODO: Handle other control frames.
 
-        // TODO: Handle control frames appearing in the middle of a multi-frame
-        //       message
 
         return SocketState.UPGRADED;
     }
 
+    
+    
     protected abstract void onBinaryData(InputStream is) throws IOException;
     protected abstract void onTextData(Reader r) throws IOException;
+    protected abstract void endOfMessage();
+    
+    private void setContinued(WebSocketFrame frame){
+		if(frame.isFin()){
+			continued = false;
+		}else{
+			continued = true;
+		}
+    }
+    private void handleControl(WebSocketFrame frame){
+//    	TODO: handle control frames
+    	
+    	switch(frame.getOpcode()){
+    	case Ping:
+    	case Pong:
+    	case ConnectionClose:
+    		
+    	}
+    }
+    private void handleDataFrame(WebSocketFrame frame) throws IOException {
+      WsInputStream wsIs = new WsInputStream(processor, frame.getMaskingKey(),
+    		  frame.getPayloadLength());
+    	switch(frame.getOpcode()){
+			case Text:
+		        InputStreamReader r =
+		        	new InputStreamReader(wsIs, B2CConverter.UTF_8);
+		        onTextData(r);
+			case Binary:
 
+				onBinaryData(wsIs);
+    	}
+    	if (!continued){
+    		endOfMessage();
+    	}else{
+    		messageDataType = frame.getOpcode();
+    	}
+    	
+    }
+    
     private void validateOpCode(int opCode) throws IOException {
         switch (opCode) {
         case 0:
