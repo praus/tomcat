@@ -54,6 +54,12 @@ public class TestWebSocket extends TomcatBaseTest {
         protected void onTextData(Reader r) {
             // TODO Auto-generated method stub
         }
+
+        @Override
+        protected void endOfMessage() {
+            // TODO Auto-generated method stub
+            
+        }
     }
 
 
@@ -78,6 +84,12 @@ public class TestWebSocket extends TomcatBaseTest {
         @Override
         protected void onTextMessage(CharBuffer message) {
             // TODO Auto-generated method stub
+        }
+
+        @Override
+        protected void endOfMessage() {
+            // TODO Auto-generated method stub
+            
         }
     }
 }

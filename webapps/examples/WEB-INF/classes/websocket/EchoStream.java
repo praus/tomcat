@@ -87,6 +87,13 @@ public class EchoStream extends WebSocketServlet {
 				e.printStackTrace();
 			}
 		}
+		
+        @Override
+        protected void endOfMessage()
+        {
+            // TODO this method isn't really relevant for the streaming thread approach
+            System.out.println("end of message (all fragments received)");
+        }
 
 		public void run() {
 			while (true) {

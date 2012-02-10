@@ -46,5 +46,10 @@ public class EchoMessage extends WebSocketServlet {
         protected void onTextMessage(CharBuffer message) throws IOException {
             System.out.println(message);
         }
+
+        @Override
+        protected void endOfMessage() {
+            System.out.println("end of message (all fragments received)");
+        }
     }
 }

@@ -154,7 +154,7 @@ public class WebSocketFrame {
         // Read the next byte
         i = processor.read();
         
-        boolean mask = (i & 0x80) == 0;
+        boolean mask = (i & 0x80) > 0;
         if (!mask) {
             // Client data must be masked and this isn't
             // TODO: Better message
