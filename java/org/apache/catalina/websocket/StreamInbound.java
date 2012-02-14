@@ -132,15 +132,20 @@ public abstract class StreamInbound implements UpgradeInbound {
 			continued = true;
 		}
     }
-    private void handleControl(WebSocketFrame frame){
-//    	TODO: handle control frames
+    private void handleControl(WebSocketFrame frame) throws IOException {
+//    	TODO: handle control frames instead of just reading payload data
     	
     	switch(frame.getOpcode()){
     	case Ping:
     	case Pong:
     	case ConnectionClose:
-    		
-    	}
+        }
+        long remaining = frame.getPayloadLength();
+        while(remaining > 0){
+            remaining--;
+            processor.read();
+        }
+
     }
     private void handleDataFrame(WebSocketFrame frame) throws IOException {
       WsInputStream wsIs = new WsInputStream(processor, frame.getMaskingKey(),
