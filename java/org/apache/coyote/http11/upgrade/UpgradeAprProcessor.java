@@ -38,7 +38,8 @@ public class UpgradeAprProcessor extends UpgradeProcessor<Long> {
 
         this.socket = wrapper.getSocket().longValue();
     }
-    
+
+
     /*
      * Output methods
      */
