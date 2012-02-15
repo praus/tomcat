@@ -38,8 +38,7 @@ public class UpgradeAprProcessor extends UpgradeProcessor<Long> {
 
         this.socket = wrapper.getSocket().longValue();
     }
-
-
+    
     /*
      * Output methods
      */
@@ -65,6 +64,10 @@ public class UpgradeAprProcessor extends UpgradeProcessor<Long> {
         return bytes[0];
     }
 
+    @Override
+    public void close() throws IOException {
+        Socket.close(socket);
+    }
 
     @Override
     public int read(byte[] bytes) throws IOException {

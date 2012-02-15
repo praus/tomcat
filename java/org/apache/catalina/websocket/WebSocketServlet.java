@@ -62,11 +62,9 @@ public abstract class WebSocketServlet extends HttpServlet {
     @Override
     protected void doGet(HttpServletRequest req, HttpServletResponse resp)
             throws ServletException, IOException {
-
+        
         // Information required to send the server handshake message
         String key;
-        String subProtocol = null;
-        List<String> extensions = Collections.emptyList();
 
         if (!headerContains(req, "upgrade", "websocket")) {
             resp.sendError(HttpServletResponse.SC_BAD_REQUEST);
@@ -96,27 +94,31 @@ public abstract class WebSocketServlet extends HttpServlet {
             return;
         }
 
-        // TODO Read client handshake - Sec-WebSocket-Protocol
-        //                              Sec-WebSocket-Extensions
+        String subprotocol = req.getHeader("Sec-WebSocket-Protocol");
+        if (subprotocol != null) {
+            // TODO future websocket subprotocols
+        }
 
         // TODO Extensions require the ability to specify something (API TBD)
         //      that can be passed to the Tomcat internals and process extension
         //      data present when the frame is fragmented.
-
+        List<String> extensions = Collections.emptyList();
+        String extensionString = req.getHeader("Sec-WebSocket-Extensions");
+        if (extensionString != null) {
+            // TODO read websocket extensions
+        }
+        if (!extensions.isEmpty()) {
+            // TODO future websocket extensions
+        }
+        
         // If we got this far, all is good. Accept the connection.
         resp.setHeader("upgrade", "websocket");
         resp.setHeader("connection", "upgrade");
         resp.setHeader("Sec-WebSocket-Accept", getWebSocketAccept(key));
-        if (subProtocol != null) {
-            // TODO
-        }
-        if (!extensions.isEmpty()) {
-            // TODO
-        }
 
         // Small hack until the Servlet API provides a way to do this.
-        StreamInbound inbound = createWebSocketInbound();
-        ((RequestFacade) req).doUpgrade(inbound);
+        WebSocketConnection connection = createWebSocketConnection();
+        ((RequestFacade) req).doUpgrade(connection);
     }
 
 
@@ -163,5 +165,5 @@ public abstract class WebSocketServlet extends HttpServlet {
         return true;
     }
 
-    protected abstract StreamInbound createWebSocketInbound();
+    protected abstract WebSocketConnection createWebSocketConnection();
 }

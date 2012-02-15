@@ -1,15 +1,33 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package org.apache.catalina.websocket;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.io.Reader;
 import java.nio.ByteBuffer;
+import java.nio.charset.Charset;
 
 import org.apache.catalina.util.Conversions;
+import org.apache.catalina.util.IOTools;
 import org.apache.coyote.http11.upgrade.UpgradeProcessor;
-import org.apache.tomcat.util.buf.B2CConverter;
-
 
 /* 
  0                   1                   2                   3
@@ -37,15 +55,19 @@ import org.apache.tomcat.util.buf.B2CConverter;
  * from an InputStream
  */
 public class WebSocketFrame {
+    /**
+     * The character set used to encode text frames
+     */
+    private static final Charset textCharset = Charset.forName("UTF-8");
 
     /**
-     * Maximum length of the header if all fields are used.
+     * The maximum supported payload length (temporary implementation)
      */
-    public static final int MAX_HEADER_LENGTH = 14;
-    
+    private static final long maxSupportedPayloadLength = 1 << 25; // 32 MB
+
     /**
-     * FIN bit, every non-fragmented bit should have this set. It has
-     * nothing to do with closing of connection.
+     * FIN bit, every non-fragmented bit should have this set. It has nothing to
+     * do with closing of connection.
      */
     private boolean fin;
 
@@ -53,11 +75,6 @@ public class WebSocketFrame {
      * Type of the frame.
      */
     private OpCode opcode;
-    
-    /**
-     * Status code this frame will be carrying, if any.
-     */
-    private StatusCode statusCode;
 
     /**
      * Whether this frame's data are masked by maskingKey.
@@ -65,28 +82,27 @@ public class WebSocketFrame {
     private boolean mask;
 
     /**
-     * Size of the payload
-     */
-    private long payloadLength;
-
-    /**
      * If the payload (data) is masked, it needs to be XORed (in a special way)
      * with this value.
      */
     private byte[] maskingKey;
-    private ByteBuffer data;
 
     /**
-     * encoded frame ready for wire transmission
+     * Length of the payload in bytes
      */
-    private ByteBuffer encoded;
+    private long payloadLength;
 
     /**
-     * Type of frame.
+     * The payload stream (someday this will allow for 63-bit payloads)
+     */
+    private InputStream payload;
+
+    /**
+     * Type of frame
      */
     public enum OpCode {
-        Continuation(0x0), Text(0x1), Binary(0x2), ConnectionClose(0x8),
-        Ping(0x9), Pong(0xA);
+        Continuation(0x0), Text(0x1), Binary(0x2),
+        ConnectionClose(0x8), Ping(0x9), Pong(0xA);
 
         private final int opcode;
 
@@ -103,21 +119,21 @@ public class WebSocketFrame {
             return this.name();
         }
 
-        public static OpCode getOpCodeByNumber(int opcode) {
-            OpCode o = OpCode.Text;
-            for (OpCode opc : OpCode.values()) {
-                if (opc.getOpCodeNumber() == opcode)
-                    o = opc;
+        public static OpCode getOpCodeByNumber(int number) throws IOException {
+            for (OpCode opcode : OpCode.values()) {
+                if (opcode.getOpCodeNumber() == number)
+                    return opcode;
             }
-            return o;
+
+            throw new IOException("invalid opcode");
         }
     }
-    
+
     public enum StatusCode {
         NormalClose(1000), ProtocolErrorClose(1002), MessageTooBig(1009);
-        // TODO: there are far more status codes defined:
+        // TODO there are far more status codes defined:
         // http://tools.ietf.org/html/rfc6455#section-7.4
-        
+
         private final int statusCode;
 
         StatusCode(int statusCode) {
@@ -128,146 +144,219 @@ public class WebSocketFrame {
             return this.statusCode;
         }
 
+        public byte[] encode() {
+            // Status codes are 16-bit unsigned integers
+            ByteBuffer code = ByteBuffer.allocate(2);
+            code.putShort((short) statusCode);
+
+            // TODO include optional UTF-8 explanation in closing frames
+            // (must adjust the size of the buffer accordingly)
+
+            return code.array();
+        }
+
         @Override
         public String toString() {
             return this.name();
         }
     }
+    
+    public static WebSocketFrame decode(final UpgradeProcessor<?> processor)
+            throws IOException
+    {
+        return decode(new InputStream() {
+            @Override
+            public int read() throws IOException {
+                return processor.read();
+            }
+        });
+    }
 
-    public static WebSocketFrame decode(UpgradeProcessor<?> processor) throws IOException {
+    public static WebSocketFrame decode(InputStream input)
+            throws IOException {
         // Read the first byte
-        int i = processor.read();
+        int i = input.read();
 
-        boolean fin = (i & 0x80) > 0;
+        if (i == -1) {
+            throw new IOException("reached end of stream");
+        }
 
+        // Build a frame from scratch
+        WebSocketFrame frame = new WebSocketFrame();
+
+        // Set the fin bit
+        frame.setFin((i & 0x80) > 0);
+
+        // Extract the reserved bits
         boolean rsv1 = (i & 0x40) > 0;
         boolean rsv2 = (i & 0x20) > 0;
         boolean rsv3 = (i & 0x10) > 0;
 
+        // For now, require all reserved bits to be cleared
         if (rsv1 || rsv2 || rsv3) {
-            // TODO: Not supported.
+            // TODO better error message for reserved bits
+            throw new IOException("reserved bits must not be set");
         }
 
-        OpCode opCode = OpCode.getOpCodeByNumber((i & 0x0F));
-        validateOpCode(opCode);
-        
-        // Read the next byte
-        i = processor.read();
-        
-        boolean mask = (i & 0x80) > 0;
-        if (!mask) {
-            // Client data must be masked and this isn't
-            // TODO: Better message
-            throw new IOException();
-        }
-        
+        // Set the opcode
+        frame.setOpcode(OpCode.getOpCodeByNumber((i & 0x0F)));
+
+        // Read the second byte
+        i = input.read();
+
+        // Set the mask
+        frame.setMask((i & 0x80) > 0);
+
+        // Read the payload length
+        // (not set until payload is actually read)
         long payloadLength = i & 0x7F;
+
+        // Read the extended payload length field, if present
         if (payloadLength == 126) {
-            byte[] extended = new byte[2];
-            processor.read(extended);
+            // Read the 16-bit field
+            byte[] extended = readAll(input, 2);
+            
+            // Set the actual payload length
             payloadLength = Conversions.byteArrayToLong(extended);
+            
         } else if (payloadLength == 127) {
-            byte[] extended = new byte[8];
-            processor.read(extended);
+            // Read the 63-bit field
+            byte[] extended = readAll(input, 8);
+
+            // Set the actual payload length
             payloadLength = Conversions.byteArrayToLong(extended);
+            
         }
 
-        byte[] maskingKey = new byte[4];
-        processor.read(maskingKey);
+        // Read the masking key, if present
+        if (frame.isMask()) {
+            byte[] maskingKey = readAll(input, 4);
+            frame.setMaskingKey(maskingKey);
+        } else {
+            // This is a server, so require client data to be masked
+            // TODO better error message for unmasked client data
+            throw new IOException("client data must be masked");
+        }
         
-        WebSocketFrame frame = new WebSocketFrame(fin, opCode, mask,
-                payloadLength, maskingKey);
+        // Decode the payload
+        validatePayloadLength(payloadLength);
+        byte[] payload = readAll(input, (int) payloadLength);
+
+        // Set the payload (implicitly sets the payload length)
+        frame.setPayload(payload);
         
+        // Unmask the payload
+        frame.maskPayload();
+
+        // Return the fully decoded frame
         return frame;
     }
-    
-    private static void validateOpCode(OpCode opCode) throws IOException {
-        switch (opCode) {
-        case Continuation:
-        case Text:
-        case Binary:
-        case ConnectionClose:
-        case Ping:
-        case Pong:
-            break;
-        default:
-            // TODO: Message
-            throw new IOException();
+
+    /**
+     * Writes this frame to the given stream
+     * @param OutputStream the stream to write to
+     */
+    public void encode(OutputStream output) throws IOException {
+        // Encode the first byte (flags and opcode)
+        int flagsAndOpcode = 0;
+
+        // Set the final fragment bit
+        flagsAndOpcode = flagsAndOpcode | (fin ? 0x80 : 0x00);
+
+        // Set reserve bits
+        // flagsAndOpcode = flagsAndOpcode | rsv1 | rsv2 | rsv3;
+
+        // Set the opcode
+        flagsAndOpcode = flagsAndOpcode | opcode.getOpCodeNumber();
+
+        // Write the first byte (flags and opcode)
+        output.write(flagsAndOpcode);
+
+        // Encode the second byte (masking bit and payload length)
+        int maskAndLength = 0;
+
+        // Set the masking bit
+        maskAndLength = maskAndLength | (mask ? 0x80 : 0x00);
+        
+        // Determine if we need an extended length field
+        byte[] extendedLength = null;
+
+        if (payloadLength > 0xffff) { // 63-bit extended length
+            // Set the length field
+            maskAndLength = maskAndLength | 127;
+
+            // Write the extended field
+            extendedLength = getBytes(payloadLength, 8);
+
+            // TODO implement 63-bit payloads
+            throw new UnsupportedOperationException(
+                    "63-bit payloads not supported");
+
+        } else if (payloadLength > 125) { // 16-bit extended length
+            // Set the length field
+            maskAndLength = maskAndLength | 126;
+
+            // Write the extended field
+            extendedLength = getBytes(payloadLength, 2);
         }
+        else
+        {
+            // Set the length field
+            maskAndLength = maskAndLength | (int) payloadLength;
+        }
+        
+        // Write the mask and length fields
+        output.write(maskAndLength);
+        
+        // Write the extended length field, if any
+        if(extendedLength != null) {
+            output.write(extendedLength);
+        }
+        
+        if (mask) {
+            // Write the masking key
+            output.write(maskingKey);
+            
+            // Mask the payload
+            maskPayload();
+        }
+        
+        // Write the payload
+        validatePayloadLength(payloadLength);
+        IOTools.flow(payload, output);
     }
     
-    /**
-     * Encodes contents of this frame into bytes stored in ByteBuffer
-     * 
-     * @return buffer with encoded data, ready for reading (flipped)
-     */
-    public InputStream encode() {
-        encoded = ByteBuffer.allocate(MAX_HEADER_LENGTH + data.limit());
-        //byte flags = 0b1000; // fin
-        int flags = fin ? 1 : 0; // just fin without extensions
-        byte opcode = (byte) this.opcode.getOpCodeNumber();
-        encoded.put((byte) (opcode | (flags << 7)));
-
-        byte mask = 0;
-        int payloadLen = data.remaining();
-
-        int firstLen = payloadLen; // first length field
-        byte[] extendedLen = new byte[0];
-        if (payloadLen > 65536) { // use 64 bit field for really large payloads
-            // TODO: implement
-            firstLen = 127;
-            extendedLen = new byte[8];
-            throw new UnsupportedOperationException("Not implemented yet");
-        } else if (payloadLen > 125) { // 16 bit field
-            firstLen = 126;
-            extendedLen = new byte[2];
-            extendedLen[0] = (byte) ((payloadLen >> 8) & 0xFF);
-            extendedLen[1] = (byte) (payloadLen & 0xFF);
+    private static void validatePayloadLength(long length) {
+        // This is a first-draft implementation, without a fancy
+        // streaming API to support really huge messages, so we
+        // an artificial limit on payload length to make things easier.
+        // TODO remove this method when streaming payload is implemented
+        if (length > maxSupportedPayloadLength) {
+            throw new UnsupportedOperationException("payload too large");
         }
-        // include length in the basic header 2-byte header
-        encoded.put((byte) ((mask << 7) | (firstLen)));
-        
-        // put extended len, in case we are sending larger message
-        encoded.put(extendedLen);
-        
-        // if this is a control frame, include a status code
-        if (statusCode != null) {
-            int sC = statusCode.getStatusCodeNumber();
-            encoded.putShort((short) (sC & 0xFFFF));
-        }
-        encoded.put(data);
-        encoded.flip(); // prepare buffer for reading
-        
-        // The slice of the bytebuffer we allocated has exactly the capacity we 
-        // need, we can therefore just use its backing array. We can also be
-        // sure it has a backing array.
-        ByteArrayInputStream out = new ByteArrayInputStream(encoded.slice().array()); 
-        return out;
     }
 
     /**
      * Creates a new control frame for closing the connection
-     * @return closing frame.
+     * 
+     * @return normal closing frame
      */
     public static WebSocketFrame closeFrame() {
-        WebSocketFrame f = new WebSocketFrame(true, OpCode.ConnectionClose,
-                false, 0, null); 
-        f.setStatusCode(StatusCode.NormalClose);
-        return f;
+        return new WebSocketFrame(true, OpCode.ConnectionClose,
+                StatusCode.NormalClose.encode());
     }
-    
+
     /**
      * Creates a new control frame for closing the connection with protocol
-     * error. 
-     * @return closing frame
+     * error.
+     * 
+     * @return protocol error closing frame
      */
     public static WebSocketFrame protocolErrorCloseFrame() {
-        WebSocketFrame f = new WebSocketFrame(true, OpCode.ConnectionClose,
-                false, 0, null);
-        f.setStatusCode(StatusCode.ProtocolErrorClose);
-        return f;
+        return new WebSocketFrame(true, OpCode.ConnectionClose,
+                StatusCode.ProtocolErrorClose.encode());
     }
-    
+
     /**
      * Wrapper around constructor that allows to easily send a text message.
      * 
@@ -276,82 +365,67 @@ public class WebSocketFrame {
      * @return frame with message encoded as data in the frame
      */
     public static WebSocketFrame message(String message) {
-        ByteBuffer buf = ByteBuffer.allocate(message.length());
-        buf.put(message.getBytes());
-        buf.flip();
-        WebSocketFrame f = new WebSocketFrame(buf);
-        return f;
+        return new WebSocketFrame(true, OpCode.Text,
+                message.getBytes(textCharset));
+    }
+    
+    /**
+     * Convenient method that makes it easy to send a pong reply
+     * 
+     * @param WebSocketFrame
+     *              the ping message to which to reply
+     *              
+     * @return the reply to the given ping
+     */
+    public static WebSocketFrame makePong(WebSocketFrame frame) {
+        // Actually, we just need to flip the mask and set the new opcode
+        frame.setMask(!frame.isMask());
+        frame.setOpcode(OpCode.Pong);
+        
+        return frame;
     }
 
     /**
-     * Constructor with values for default frame
-     * 
-     * @param data
-     *            payload of the frame
+     * Private constructor for null frames
      */
-    public WebSocketFrame(ByteBuffer data) {
-        this(true, OpCode.Text, false, data.remaining(), null, data);
+    private WebSocketFrame() {
     }
-    
+
     /**
-     * Constructor without maskingKey for creating new frames to be encoded.
-     *
+     * Constructor for frames with unmasked payload
+     * 
      * @param fin
      *            whether FIN bit should be set
      * @param opcode
      *            type of frame
      * @param mask
      *            whether this frame is masked
-     * @param payloadLength
-     *            payload size (capacity of the data buffer)
+     * @param payload
+     *            the byte array containing the payload
      */
-    public WebSocketFrame(boolean fin, OpCode opcode, long payloadLength) {
+    public WebSocketFrame(boolean fin, OpCode opcode, byte[] payload) {
         this.fin = fin;
+        this.mask = false;
         this.opcode = opcode;
-        this.payloadLength = payloadLength;
+        setPayload(payload);
     }
     
     /**
-     * Constructor without data, they are to be specified later or left blank
+     * Constructor for frames with unmasked payload
      * 
      * @param fin
      *            whether FIN bit should be set
      * @param opcode
      *            type of frame
-     * @param mask
-     *            whether this frame is masked
-     * @param payloadLength
-     *            payload size (capacity of the data buffer)
-     * @param maskingKey
-     *            for unmasking data (if mask==true)
+     * @param payload
+     *            the byte buffer containing the payload
      */
-    public WebSocketFrame(boolean fin, OpCode opcode, boolean mask,
-            long payloadLength, byte[] maskingKey) {
-        this(fin, opcode, mask, payloadLength, maskingKey, null);
-    }
-    
-    /**
-     * Constructor for setting every aspect of the frame
-     * 
-     * @param fin
-     *            whether FIN bit should be set
-     * @param opcode
-     *            type of frame
-     * @param mask
-     *            whether this frame is masked
-     * @param payloadLength
-     *            payload size (capacity of the data buffer)
-     * @param maskingKey
-     *            for unmasking data (if mask==true)
-     */
-    public WebSocketFrame(boolean fin, OpCode opcode, boolean mask,
-            long payloadLength, byte[] maskingKey, ByteBuffer data) {
+    public WebSocketFrame(boolean fin, OpCode opcode,
+            ByteBuffer payload) {
         this.fin = fin;
+        this.mask = true;
         this.opcode = opcode;
-        this.mask = mask;
-        this.payloadLength = payloadLength;
-        this.maskingKey = maskingKey;
-        this.data = data;
+        setPayload(payload);
     }
 
     @Override
@@ -359,21 +433,6 @@ public class WebSocketFrame {
         return String.format("FIN:%s OPCODE:%s MASK:%s LEN:%s\n", fin ? "1"
                 : "0", opcode, mask ? "1" : "0", payloadLength);
     }
-
-    /**
-     * Clones the frame object. Note that data buffer is not entirely
-     * independent
-     * for efficiency purposes. There's no need to really duplicate the frame
-     * content since data buffers in frame objects are usually not going to be
-     * reused.
-     * 
-     * @return independent WebSocketFrame instance
-     */
-    /*@Override
-    protected WebSocketFrame clone() {
-        return new WebSocketFrame(fin, opcode, mask, payloadLength, maskingKey,
-                data.duplicate());
-    }*/
 
     /**
      * @return Whether this frame is the final frame.
@@ -394,17 +453,9 @@ public class WebSocketFrame {
         this.opcode = opcode;
     }
 
-    public StatusCode getStatusCode() {
-        return statusCode;
-    }
-
-    public void setStatusCode(StatusCode statusCode) {
-        this.statusCode = statusCode;
-    }
-
     /**
-     * Indicates whether this frame has Connection Close flag set and
-     * therefore the endpoint receiving this frame must close connection.
+     * Indicates whether this frame has Connection Close flag set and therefore
+     * the endpoint receiving this frame must close connection.
      */
     public boolean isClose() {
         return getOpcode().equals(OpCode.ConnectionClose);
@@ -417,6 +468,10 @@ public class WebSocketFrame {
     public void setMask(boolean mask) {
         this.mask = mask;
     }
+    
+    public void toggleMask() {
+        setMask(!mask);
+    }
 
     /**
      * @return true iff this frame contains binary or text data
@@ -424,23 +479,15 @@ public class WebSocketFrame {
     public boolean isData() {
         return opcode.equals(OpCode.Binary) || opcode.equals(OpCode.Text);
     }
-    
+
     /**
-     * Finds out whether this frame is a control frame. 
+     * Finds out whether this frame is a control frame.
+     * 
      * @return true iff this frame is a control frame
      */
     public boolean isControl() {
-        return opcode.equals(OpCode.ConnectionClose) || 
-                opcode.equals(OpCode.Ping) || 
-                opcode.equals(OpCode.Pong);
-    }
-    
-    public long getPayloadLength() {
-        return payloadLength;
-    }
-
-    public void setPayloadLength(long payloadLength) {
-        this.payloadLength = payloadLength;
+        return opcode.equals(OpCode.ConnectionClose)
+                || opcode.equals(OpCode.Ping) || opcode.equals(OpCode.Pong);
     }
 
     public byte[] getMaskingKey() {
@@ -450,16 +497,102 @@ public class WebSocketFrame {
     public void setMaskingKey(byte[] maskingKey) {
         this.maskingKey = maskingKey;
     }
-
-    protected ByteBuffer getDataAsByteBuffer() {
-        return data;
+    
+    private void maskPayload()
+    {
+        payload = new MaskingStream(payload, maskingKey);
     }
-
-    public ByteBuffer getDataCopy() {
-        return data.asReadOnlyBuffer();
+    
+    public long getPayloadLength() {
+        return payloadLength;
     }
+    
+    /**
+     * @returns the payload
+     */
+    public InputStream getPayload() {
+        return payload;
+    }
+    
+    public Reader readPayload() {
+        return new InputStreamReader(payload, textCharset);
+    }
+    
+    public void setPayload(InputStream newPayload, long newPayloadLength) {
+        this.payload = newPayload;
+        this.payloadLength = newPayloadLength;
+    }
+    
+    public void setPayload(byte[] newPayload) {
+        // Convert to stream
+        setPayload(new ByteArrayInputStream(newPayload), newPayload.length);
+    }
+    
+    public void setPayload(ByteBuffer newPayload) {
+        // Convert to stream
+        setPayload(new ByteArrayInputStream(newPayload.array(),
+                newPayload.position(), newPayload.remaining()),
+                newPayload.remaining());
+    }
+    
+    /**
+     * Safely reads available bytes from stream into a byte array
+     * @param InputStream the stream to read from
+     * @param int the number of bytes to read
+     * @return a byte array containing input bytes or null on failure
+     * @throws IOException
+     */
+    public static byte[] readAll(InputStream input, int length)
+    throws IOException
+    {
+        // Declare the byte array
+        byte[] buffer = new byte[length];
+        
+        // See how many bytes are returned
+        int totalBytesRead = 0;
+        
+        // Read up bytes until we have them all or there aren't any more
+        while(totalBytesRead < length)
+        {
+            // Count the number of bytes read
+            int bytesRead = input.read(buffer, totalBytesRead,
+                    length - totalBytesRead);
 
-    public void setData(ByteBuffer data) {
-        this.data = data;
+            // Check for end of input
+            if(bytesRead == -1) break;
+            
+            // Total the number of bytes read
+            totalBytesRead += bytesRead;
+        }
+        
+        // Ensure we read all the bytes
+        if(totalBytesRead != length)
+        {
+            throw new IOException("stopped reading bytes prematurely");
+        }
+        
+        // Return the byte array
+        return buffer;
+    }
+    
+    /**
+     * Extracts the bytes of an unsigned integer as bytes
+     * @param long the unsigned integer whose bytes are to be extracted
+     * @param int the number of significant bytes (low-order)
+     * @return a byte array representing the bytes of the unsigned integer
+     */
+    public static byte[] getBytes(long unsignedInt, int numBytes)
+    {
+        // Initialize the byte array
+        byte[] array = new byte[numBytes];
+        
+        // Extract each bytes
+        for(int i = 0; i < array.length; ++i)
+        {
+            array[numBytes - i - 1] = (byte) (unsignedInt >> (i * 8));
+        }
+        
+        // Return the constructed array
+        return array;
     }
 }

@@ -16,10 +16,7 @@
  */
 package org.apache.catalina.websocket;
 
-import java.io.InputStream;
-import java.io.Reader;
-import java.nio.ByteBuffer;
-import java.nio.CharBuffer;
+import java.io.IOException;
 
 import org.junit.Test;
 
@@ -38,54 +35,25 @@ public class TestWebSocket extends TomcatBaseTest {
         private static final long serialVersionUID = 1L;
 
         @Override
-        protected StreamInbound createWebSocketInbound() {
-            return new SimpleStreamInbound();
+        protected WebSocketConnection createWebSocketConnection() {
+            return new SimpleConnection();
         }
     }
 
-    private static final class SimpleStreamInbound extends StreamInbound {
-
+    private static final class SimpleConnection extends WebSocketConnection {
+        
         @Override
-        protected void onBinaryData(InputStream is) {
-            // TODO Auto-generated method stub
-        }
-
-        @Override
-        protected void onTextData(Reader r) {
-            // TODO Auto-generated method stub
-        }
-
-        @Override
-        protected void endOfMessage() {
+        protected void onTextData(WebSocketFrame frame) throws IOException {
             // TODO Auto-generated method stub
             
         }
-    }
-
-
-    private static final class MessageWebSocketServlet
-            extends WebSocketServlet {
-
-        private static final long serialVersionUID = 1L;
 
         @Override
-        protected StreamInbound createWebSocketInbound() {
-            return new SimpleMessageInbound();
-        }
-    }
-
-    private static final class SimpleMessageInbound extends MessageInbound {
-
-        @Override
-        protected void onBinaryMessage(ByteBuffer message) {
+        protected void onBinaryData(WebSocketFrame frame) throws IOException {
             // TODO Auto-generated method stub
+            
         }
-
-        @Override
-        protected void onTextMessage(CharBuffer message) {
-            // TODO Auto-generated method stub
-        }
-
+        
         @Override
         protected void endOfMessage() {
             // TODO Auto-generated method stub

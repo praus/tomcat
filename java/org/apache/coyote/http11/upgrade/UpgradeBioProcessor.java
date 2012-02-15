@@ -33,13 +33,17 @@ public class UpgradeBioProcessor extends UpgradeProcessor<Socket> {
 
     private InputStream inputStream;
     private OutputStream outputStream;
+    
+    private Socket socket;
 
     public UpgradeBioProcessor(SocketWrapper<Socket> wrapper,
             UpgradeInbound upgradeInbound) throws IOException {
         super(upgradeInbound);
 
-        this.inputStream = wrapper.getSocket().getInputStream();
-        this.outputStream = wrapper.getSocket().getOutputStream();
+        socket = wrapper.getSocket();
+        
+        this.inputStream = socket.getInputStream();
+        this.outputStream = socket.getOutputStream();
     }
 
 
@@ -70,5 +74,10 @@ public class UpgradeBioProcessor extends UpgradeProcessor<Socket> {
     @Override
     public int read(byte[] bytes) throws IOException {
         return inputStream.read(bytes);
+    }
+    
+    @Override
+    public void close() throws IOException {
+        socket.close();
     }
 }

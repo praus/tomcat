@@ -17,185 +17,51 @@
 package websocket;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.io.OutputStreamWriter;
-import java.io.PipedInputStream;
-import java.io.PipedOutputStream;
-import java.io.Reader;
-import java.io.Writer;
-import java.nio.charset.Charset;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.BlockingQueue;
 
-import org.apache.catalina.websocket.StreamInbound;
+import org.apache.catalina.websocket.WebSocketConnection;
+import org.apache.catalina.websocket.WebSocketFrame;
 import org.apache.catalina.websocket.WebSocketServlet;
-import org.apache.tomcat.util.buf.B2CConverter;
 
 public class EchoStream extends WebSocketServlet {
 
 	private static final long serialVersionUID = 1L;
 
 	@Override
-	protected StreamInbound createWebSocketInbound() {
-		return new EchoStreamInbound();
+	protected WebSocketConnection createWebSocketConnection() {
+	    // Create a connection that echoes back anything it receives
+		return new EchoStreamConnection();
 	}
 
-	private final class EchoStreamInbound extends StreamInbound implements
-			Runnable {
-
-	    private static final int queueSize = 1;
-	    
-		private final BlockingQueue<Conduit> queue
-		        = new ArrayBlockingQueue<Conduit>(queueSize);
-
-		protected EchoStreamInbound() {
-			Thread thread = new Thread(this);
-			thread.start();
-		}
-
-		@Override
-		protected void onBinaryData(final InputStream in) throws IOException {
-			try {
-				PipedInputStream pipe = new PipedInputStream();
-				OutputStream out = new PipedOutputStream(pipe);
-
-				queue.put(new Conduit(in, out));
-				
-				getStreamOutbound().writeBinaryStream(pipe);
-
-			} catch (InterruptedException e) {
-				e.printStackTrace();
-			}
-		}
-
-		@Override
-		protected void onTextData(final Reader reader) throws IOException {
-			try {
-			    Charset charset = B2CConverter.UTF_8;
-				PipedInputStream pipeStream = new PipedInputStream();
-				OutputStream out = new PipedOutputStream(pipeStream);
-				Writer writer = new OutputStreamWriter(out, charset);
-				Reader pipe = new InputStreamReader(pipeStream, charset);
-
-				queue.put(new Conduit(reader, writer));
-
-				getStreamOutbound().writeTextStream(pipe);
-
-			} catch (InterruptedException e) {
-				e.printStackTrace();
-			}
-		}
-		
+	private final class EchoStreamConnection extends WebSocketConnection
+	{
         @Override
-        protected void endOfMessage()
-        {
-            // TODO this method isn't really relevant for the streaming thread approach
-            System.out.println("end of message (all fragments received)");
+        protected void onTextData(WebSocketFrame frame) throws IOException {
+            System.out.println("<message opcode=\"text\" len=\"" +
+                    frame.getPayloadLength()+ "\" />");
+            
+            // Toggle the masking flag
+            frame.toggleMask();
+            
+            // Echo the frame right back
+            writeFrame(frame);
         }
 
-		public void run() {
-			while (true) {
-				try {
-					Conduit conduit = queue.take();
-					
-					if(conduit.isText()) {
-					    handleTextFrame(conduit);
-					}
-					else {
-					    handleBinaryFrame(conduit);
-					}
-				} catch (IOException e) {
-					System.err.println("websocket stream io exception");
-					e.printStackTrace();
-					break;
-				} catch (InterruptedException e) {
-					System.err.println("websocket thread take() interrupted");
-					break;
-				}
-			}
-		}
-		
-		private void handleTextFrame(Conduit conduit) throws IOException
-		{
-		    Reader reader = conduit.getReader();
-            Writer writer = conduit.getWriter();
-
-            int i;
-            while ((i = reader.read()) != -1) {
-                System.out.print((char) i);
-                writer.write(i);
-            }
-
-            System.out.println();
-            writer.close();
-		}
-		
-		private void handleBinaryFrame(Conduit conduit) throws IOException
-        {
-            InputStream  input  = conduit.getInputStream();
-            OutputStream output = conduit.getOutputStream();
-
-            int i;
-            while ((i = input.read()) != -1) {
-                System.out.print((char) i);
-                output.write(i);
-            }
-
-            System.out.println();
-            output.close();
+        @Override
+        protected void onBinaryData(WebSocketFrame frame) throws IOException {
+            System.out.println("<message opcode=\"text\" len=\"" +
+                    frame.getPayloadLength()+ "\" />");
+            
+            // Toggle the masking flag
+            frame.toggleMask();
+            
+            // Echo the frame right back
+            writeFrame(frame);
         }
-	}
 
-	private static final class Conduit {
-        // Text/binary flag
-        private final boolean isText;
+        @Override
+        protected void endOfMessage() {
+            // That was the final fragment
+        }
 	    
-	    // Binary
-		private final InputStream inputStream;
-		private final OutputStream outputStream;
-		
-		// Text
-		private final Reader reader;
-		private final Writer writer;
-
-		// Binary
-		protected Conduit(InputStream incoming, OutputStream outgoing) {
-			inputStream  = incoming;
-			outputStream = outgoing;
-            reader = null;
-            writer = null;
-			isText = false;
-		}
-		
-		// Text
-		protected Conduit(Reader incoming, Writer outgoing) {
-            inputStream  = null;
-            outputStream = null;
-            reader = incoming;
-            writer = outgoing;
-            isText = true;
-        }
-		
-        protected boolean isText() {
-            return isText;
-        }
-        
-		protected InputStream getInputStream() {
-			return inputStream;
-		}
-
-		protected OutputStream getOutputStream() {
-			return outputStream;
-		}
-		
-		protected Reader getReader() {
-            return reader;
-        }
-
-        protected Writer getWriter() {
-            return writer;
-        }
 	}
 }

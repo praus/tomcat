@@ -17,39 +17,55 @@
 package websocket;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.CharBuffer;
+import java.io.InputStream;
+import java.io.Reader;
 
-import org.apache.catalina.websocket.MessageInbound;
-import org.apache.catalina.websocket.StreamInbound;
+import org.apache.catalina.websocket.WebSocketConnection;
+import org.apache.catalina.websocket.WebSocketFrame;
 import org.apache.catalina.websocket.WebSocketServlet;
-
 
 public class EchoMessage extends WebSocketServlet {
 
-    private static final long serialVersionUID = 1L;
+	private static final long serialVersionUID = 1L;
 
-    @Override
-    protected StreamInbound createWebSocketInbound() {
-        return new EchoMessageInbound();
-    }
+	@Override
+	protected WebSocketConnection createWebSocketConnection() {
+	    // Create a connection that prints out whatever messages it receives
+		return new PrintMessageConnection();
+	}
 
-    private static final class EchoMessageInbound extends MessageInbound {
-
+	private final class PrintMessageConnection extends WebSocketConnection
+	{
         @Override
-        protected void onBinaryMessage(ByteBuffer message) throws IOException {
-            System.out.write(message.array(), 0, message.limit());
-            System.out.print('\n');
+        protected void onTextData(WebSocketFrame frame) throws IOException {
+            Reader payload = frame.readPayload();
+
+            System.out.print("<message opcode=\"text\">");
+            
+            int i;
+            while((i = payload.read()) != -1)
+            {
+                System.out.print((char) i);
+            }
         }
 
         @Override
-        protected void onTextMessage(CharBuffer message) throws IOException {
-            System.out.println(message);
+        protected void onBinaryData(WebSocketFrame frame) throws IOException {
+            InputStream payload = frame.getPayload();
+
+            System.out.println("<message opcode=\"binary\">");
+            
+            int i;
+            while((i = payload.read()) != -1)
+            {
+                System.out.print((char) i);
+            }
         }
 
         @Override
         protected void endOfMessage() {
-            System.out.println("end of message (all fragments received)");
+            System.out.println("</message>");
         }
-    }
+	    
+	}
 }
