@@ -23,65 +23,66 @@ import java.io.InputStream;
 /**
  * This class masks (and demasks) WebSocket payload streams
  */
-public class MaskingStream extends InputStream
-{
-	/**
-	 * Length in bytes of the masking key field
-	 */
-	private static final int maskingKeyLength = 4;
-	
-	/**
-	 * The bit mask representing the useful bits of the mask itself
-	 */
-	private static final int maskingKeyBits = maskingKeyLength - 1;
-	
-	/**
-	 * The underlying stream being masked
-	 */
-	private final InputStream input;
-	
-	/**
-	 * The masking key
-	 */
-	private final byte[] mask;
-	
-	/**
-	 * The current position in the mask
-	 */
-	private int position = -1;
-	
-	/**
-	 * Masks (or demasks) the given input stream
-	 * @param InputStream the stream to mask
-	 * @throws IllegalArgumentException
-	 */
-	public MaskingStream(InputStream streamToMask, byte[] maskingKey)
-	{
-		input = streamToMask;
-		
-		if(maskingKey == null || maskingKey.length != maskingKeyLength)
-		{
-			throw new IllegalArgumentException("invalid masking key");
-		}
-		
-		mask = maskingKey;
+public class MaskingStream extends InputStream {
+    /**
+     * Length in bytes of the masking key field
+     */
+    private static final int maskingKeyLength = 4;
+
+    /**
+     * The bit mask representing the useful bits of the mask itself
+     */
+    private static final int maskingKeyBits = maskingKeyLength - 1;
+
+    /**
+     * The underlying stream being masked
+     */
+    private final InputStream input;
+
+    /**
+     * The masking key
+     */
+    private final int[] mask = new int[maskingKeyLength];
+
+    /**
+     * The current position in the mask
+     */
+    private int position = -1;
+
+    /**
+     * Masks (or demasks) the given input stream
+     * 
+     * @param InputStream
+     *            the stream to mask
+     * @throws IllegalArgumentException
+     */
+    public MaskingStream(InputStream streamToMask, byte[] maskingKey) {
+	input = streamToMask;
+
+	if (maskingKey == null || maskingKey.length != maskingKeyLength) {
+	    throw new IllegalArgumentException("invalid masking key");
 	}
-	
-	/**
-	 * @see FilterInputStream
-	 */
-	@Override
-	public int read() throws IOException
-	{
-	    // Read the next byte and check for end of stream
-	    int nextByte = input.read();
-	    if(nextByte == -1) {
-	        return -1;
-	    }
-	    
-		// Advance to the next place in the mask
-		position = (position + 1) & maskingKeyBits;
-		
-		return (nextByte ^ mask[position]);
+
+	// Convert the mask to unsigned integer
+	for(int i = 0; i < maskingKeyLength; ++i) {
+	    mask[i] = (maskingKey[i] & 0xff);
 	}
+    }
+
+    /**
+     * @see FilterInputStream
+     */
+    @Override
+    public int read() throws IOException {
+	// Read the next byte and check for end of stream
+	int nextByte = input.read();
+	if (nextByte == -1) {
+	    return -1;
+	}
+
+	// Advance to the next place in the mask
+	position = (position + 1) & maskingKeyBits;
+
+	return (nextByte ^ mask[position]);
+    }
 }

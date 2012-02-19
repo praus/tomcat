@@ -176,9 +176,4 @@ public class UpgradeNioProcessor extends UpgradeProcessor<NioChannel> {
         }
         return written;
     }
-    
-    @Override
-    public void close() throws IOException {
-        nioChannel.close();
-    }
 }

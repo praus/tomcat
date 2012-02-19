@@ -23,6 +23,7 @@ import org.apache.coyote.AbstractProtocol;
 import org.apache.coyote.Processor;
 import org.apache.coyote.http11.upgrade.UpgradeBioProcessor;
 import org.apache.coyote.http11.upgrade.UpgradeInbound;
+import org.apache.coyote.http11.upgrade.UpgradeProcessor;
 import org.apache.juli.logging.Log;
 import org.apache.tomcat.util.net.AbstractEndpoint;
 import org.apache.tomcat.util.net.JIoEndpoint;
@@ -137,6 +138,10 @@ public class Http11Protocol extends AbstractHttp11JsseProtocol {
         public void release(SocketWrapper<Socket> socket,
                 Processor<Socket> processor, boolean isSocketClosing,
                 boolean addToPoller) {
+            
+            // FIXME temporary hack to stop upgrades from being recycled
+            if(processor instanceof UpgradeProcessor<?>) return;
+            
             processor.recycle(isSocketClosing);
             recycledProcessors.offer(processor);
         }

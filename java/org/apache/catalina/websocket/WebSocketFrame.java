@@ -24,6 +24,8 @@ import java.io.OutputStream;
 import java.io.Reader;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
+import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CodingErrorAction;
 
 import org.apache.catalina.util.Conversions;
 import org.apache.catalina.util.IOTools;
@@ -59,12 +61,21 @@ public class WebSocketFrame {
      * The character set used to encode text frames
      */
     private static final Charset textCharset = Charset.forName("UTF-8");
-
+    
     /**
-     * The maximum supported payload length (temporary implementation)
+     * The character set decoder used for text frames
      */
-    private static final long maxSupportedPayloadLength = 1 << 25; // 32 MB
-
+    private static final CharsetDecoder charsetDecoder =
+	textCharset.newDecoder();
+    
+    /**
+     * The character set decoder should report errors
+     */
+    static {
+	charsetDecoder.onUnmappableCharacter(CodingErrorAction.REPORT);
+	charsetDecoder.onMalformedInput(CodingErrorAction.REPORT);
+    }
+    
     /**
      * FIN bit, every non-fragmented bit should have this set. It has nothing to
      * do with closing of connection.
@@ -93,7 +104,7 @@ public class WebSocketFrame {
     private long payloadLength;
 
     /**
-     * The payload stream (someday this will allow for 63-bit payloads)
+     * The payload stream
      */
     private InputStream payload;
 
@@ -130,7 +141,8 @@ public class WebSocketFrame {
     }
 
     public enum StatusCode {
-        NormalClose(1000), ProtocolErrorClose(1002), MessageTooBig(1009);
+        NormalClose(1000), ProtocolError(1002), InvalidData(1007),
+        MessageTooBig(1009);
         // TODO there are far more status codes defined:
         // http://tools.ietf.org/html/rfc6455#section-7.4
 
@@ -162,8 +174,7 @@ public class WebSocketFrame {
     }
     
     public static WebSocketFrame decode(final UpgradeProcessor<?> processor)
-            throws IOException
-    {
+            throws IOException {
         return decode(new InputStream() {
             @Override
             public int read() throws IOException {
@@ -239,11 +250,7 @@ public class WebSocketFrame {
         }
         
         // Decode the payload
-        validatePayloadLength(payloadLength);
-        byte[] payload = readAll(input, (int) payloadLength);
-
-        // Set the payload (implicitly sets the payload length)
-        frame.setPayload(payload);
+        frame.setPayload(input, payloadLength);
         
         // Unmask the payload
         frame.maskPayload();
@@ -288,10 +295,6 @@ public class WebSocketFrame {
             // Write the extended field
             extendedLength = getBytes(payloadLength, 8);
 
-            // TODO implement 63-bit payloads
-            throw new UnsupportedOperationException(
-                    "63-bit payloads not supported");
-
         } else if (payloadLength > 125) { // 16-bit extended length
             // Set the length field
             maskAndLength = maskAndLength | 126;
@@ -322,22 +325,11 @@ public class WebSocketFrame {
         }
         
         // Write the payload
-        validatePayloadLength(payloadLength);
         IOTools.flow(payload, output);
-    }
-    
-    private static void validatePayloadLength(long length) {
-        // This is a first-draft implementation, without a fancy
-        // streaming API to support really huge messages, so we
-        // an artificial limit on payload length to make things easier.
-        // TODO remove this method when streaming payload is implemented
-        if (length > maxSupportedPayloadLength) {
-            throw new UnsupportedOperationException("payload too large");
-        }
     }
 
     /**
-     * Creates a new control frame for closing the connection
+     * Creates a new control frame for closing the connection normally
      * 
      * @return normal closing frame
      */
@@ -345,16 +337,16 @@ public class WebSocketFrame {
         return new WebSocketFrame(true, OpCode.ConnectionClose,
                 StatusCode.NormalClose.encode());
     }
-
+    
     /**
-     * Creates a new control frame for closing the connection with protocol
-     * error.
+     * Creates a new control frame for closing the connection with
+     * the given status code
      * 
-     * @return protocol error closing frame
+     * @return closing frame
      */
-    public static WebSocketFrame protocolErrorCloseFrame() {
-        return new WebSocketFrame(true, OpCode.ConnectionClose,
-                StatusCode.ProtocolErrorClose.encode());
+    public static WebSocketFrame makeCloseFrame(StatusCode statusCode) {
+	return new WebSocketFrame(true, OpCode.ConnectionClose,
+		statusCode.encode());
     }
 
     /**
@@ -379,7 +371,7 @@ public class WebSocketFrame {
      */
     public static WebSocketFrame makePong(WebSocketFrame frame) {
         // Actually, we just need to flip the mask and set the new opcode
-        frame.setMask(!frame.isMask());
+        frame.toggleMask();
         frame.setOpcode(OpCode.Pong);
         
         return frame;
@@ -410,24 +402,6 @@ public class WebSocketFrame {
         setPayload(payload);
     }
     
-    /**
-     * Constructor for frames with unmasked payload
-     * 
-     * @param fin
-     *            whether FIN bit should be set
-     * @param opcode
-     *            type of frame
-     * @param payload
-     *            the byte buffer containing the payload
-     */
-    public WebSocketFrame(boolean fin, OpCode opcode,
-            ByteBuffer payload) {
-        this.fin = fin;
-        this.mask = true;
-        this.opcode = opcode;
-        setPayload(payload);
-    }
-
     @Override
     public String toString() {
         return String.format("FIN:%s OPCODE:%s MASK:%s LEN:%s\n", fin ? "1"
@@ -515,24 +489,20 @@ public class WebSocketFrame {
     }
     
     public Reader readPayload() {
-        return new InputStreamReader(payload, textCharset);
+        return new InputStreamReader(payload, charsetDecoder);
+    }
+    
+    public void setPayload(FiniteStream newPayload) {
+        payloadLength = newPayload.remaining();
+        payload = newPayload;
     }
     
     public void setPayload(InputStream newPayload, long newPayloadLength) {
-        this.payload = newPayload;
-        this.payloadLength = newPayloadLength;
+        setPayload(new FiniteStream(newPayload, newPayloadLength));
     }
     
     public void setPayload(byte[] newPayload) {
-        // Convert to stream
         setPayload(new ByteArrayInputStream(newPayload), newPayload.length);
-    }
-    
-    public void setPayload(ByteBuffer newPayload) {
-        // Convert to stream
-        setPayload(new ByteArrayInputStream(newPayload.array(),
-                newPayload.position(), newPayload.remaining()),
-                newPayload.remaining());
     }
     
     /**
@@ -542,7 +512,7 @@ public class WebSocketFrame {
      * @return a byte array containing input bytes or null on failure
      * @throws IOException
      */
-    public static byte[] readAll(InputStream input, int length)
+    private static byte[] readAll(InputStream input, int length)
     throws IOException
     {
         // Declare the byte array
@@ -581,7 +551,7 @@ public class WebSocketFrame {
      * @param int the number of significant bytes (low-order)
      * @return a byte array representing the bytes of the unsigned integer
      */
-    public static byte[] getBytes(long unsignedInt, int numBytes)
+    private static byte[] getBytes(long unsignedInt, int numBytes)
     {
         // Initialize the byte array
         byte[] array = new byte[numBytes];

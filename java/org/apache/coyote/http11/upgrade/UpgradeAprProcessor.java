@@ -66,11 +66,6 @@ public class UpgradeAprProcessor extends UpgradeProcessor<Long> {
     }
 
     @Override
-    public void close() throws IOException {
-        Socket.close(socket);
-    }
-
-    @Override
     public int read(byte[] bytes) throws IOException {
         return Socket.recv(socket, bytes, 0, bytes.length);
     }

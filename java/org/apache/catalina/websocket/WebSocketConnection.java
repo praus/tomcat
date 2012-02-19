@@ -17,12 +17,15 @@
 package org.apache.catalina.websocket;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.CharacterCodingException;
 
 import org.apache.coyote.http11.upgrade.UpgradeInbound;
 import org.apache.coyote.http11.upgrade.UpgradeOutbound;
 import org.apache.coyote.http11.upgrade.UpgradeProcessor;
 import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
 import org.apache.catalina.websocket.WebSocketFrame.OpCode;
+import org.apache.catalina.websocket.WebSocketFrame.StatusCode;
 
 public abstract class WebSocketConnection implements UpgradeInbound {
 
@@ -42,45 +45,62 @@ public abstract class WebSocketConnection implements UpgradeInbound {
     public void setUpgradeProcessor(UpgradeProcessor<?> processor) {
         this.processor = processor;
     }
+    
+    private class WebSocketClosedException extends IOException {
+	private static final long serialVersionUID = 1L;
+    }
 
     @Override
     public SocketState onData() throws IOException {
-        // Must be the start of a frame
-        WebSocketFrame frame = WebSocketFrame.decode(processor);
-
-        // Fragmentation
-        if (currentlyFragmented) {
-            // This frame is inside a fragmented message
-            
-            // Reject non-continuation data frames
-            if(frame.isData()) {
-                writeFrame(WebSocketFrame.protocolErrorCloseFrame());
-                closeImmediately();
-            }
-        } else {
-            // This frame is the first frame of a new message
-            
-            // Reject spurious continuation frames
-            if (frame.getOpcode() == OpCode.Continuation) {
-                writeFrame(WebSocketFrame.protocolErrorCloseFrame());
-                closeImmediately();
-            }
-        }
-        
-        // Route the frame
-        if (frame.isData() || frame.getOpcode() == OpCode.Continuation) {
-            handleDataFrame(frame);
-            
-            // Update fragmentation state for next time
-            if(frame.isFin()) {
-                currentlyFragmented = false;
+	
+	try {
+            // Must be the start of a frame
+            WebSocketFrame frame = WebSocketFrame.decode(processor);
+    
+            // Fragmentation
+            if (currentlyFragmented) {
+                // This frame is inside a fragmented message
+                
+                // Reject non-continuation data frames
+                if(frame.isData()) {
+                    writeFrame(WebSocketFrame.makeCloseFrame(StatusCode.ProtocolError));
+                    closeImmediately();
+                }
             } else {
-                currentlyFragmented = true;
-                currentDataOpcode = frame.getOpcode();
+                // This frame is the first frame of a new message
+                
+                // Reject spurious continuation frames
+                if (frame.getOpcode() == OpCode.Continuation) {
+                    writeFrame(WebSocketFrame.makeCloseFrame(StatusCode.ProtocolError));
+                    closeImmediately();
+                }
             }
-        } else if (frame.isControl()) {
-            handleControl(frame);
-        }
+            
+            // Route the frame
+            if (frame.isData() || frame.getOpcode() == OpCode.Continuation) {
+        	
+                handleDataFrame(frame);
+                
+                // Update fragmentation state for next time
+                if(frame.isFin()) {
+                    currentlyFragmented = false;
+                } else if(currentlyFragmented == false) {
+                    currentlyFragmented = true;
+                    currentDataOpcode = frame.getOpcode();
+                }
+            } else if (frame.isControl()) {
+                handleControl(frame);
+            }
+            
+	} catch(CharacterCodingException e) {
+	    // Payload contained invalid character data
+	    writeFrame(WebSocketFrame.makeCloseFrame(StatusCode.InvalidData));
+	    
+	} catch(WebSocketClosedException c) {
+	    // This tells the protocol above to drop the TsCP
+	    return SocketState.CLOSED;
+	    
+	}
         
         // TODO per-frame extension handling is not currently supported.
 
@@ -90,13 +110,13 @@ public abstract class WebSocketConnection implements UpgradeInbound {
     private void handleControl(WebSocketFrame frame) throws IOException {
         // Control frames must not be fragmented
         if (frame.isFin() == false) {
-            writeFrame(WebSocketFrame.protocolErrorCloseFrame());
+            writeFrame(WebSocketFrame.makeCloseFrame(StatusCode.ProtocolError));
             closeImmediately();
         }
 
         // Control frames must not have extended length
         if (frame.getPayloadLength() > 125) {
-            writeFrame(WebSocketFrame.protocolErrorCloseFrame());
+            writeFrame(WebSocketFrame.makeCloseFrame(StatusCode.ProtocolError));
             closeImmediately();
         }
 
@@ -107,18 +127,46 @@ public abstract class WebSocketConnection implements UpgradeInbound {
             break;
         case Pong:
             System.out.println("<pong />");
+            swallowFrame(frame);
             break;
         case ConnectionClose:
+            // Analyze the closing frame
+            analyzeIncomingClose(frame);
+            
             // Reply with a close
             writeFrame(WebSocketFrame.closeFrame());
             closeImmediately();
             break;
         }
     }
+    
+    /**
+     * Reads the payload of the given frame, and ignores it
+     * @param WebSocketFrame the frame to swallow
+     * @throws IOException 
+     */
+    private void swallowFrame(WebSocketFrame frame) throws IOException {
+	// Grab the frame's payload
+	InputStream payload = frame.getPayload();
+	
+	// Swallow the stream
+	while((payload.read()) >= 0);
+    }
+
+    private void analyzeIncomingClose(WebSocketFrame close) throws IOException {
+	// TODO Optionally deal with abnormal status codes
+	// (probably this would be done in WebSocketFrame)
+	
+	// Close payloads must be empty, or contain status
+	// information which is at least two bytes long
+	if(close.getPayloadLength() == 1) {
+	    writeFrame(WebSocketFrame.makeCloseFrame(StatusCode.ProtocolError));
+	    closeImmediately();
+	}
+    }
 
     private void closeImmediately() throws IOException {
-        // drop the TCP connection
-        processor.close();
+	throw new WebSocketClosedException();
     }
 
     public void writeFrame(WebSocketFrame frame) throws IOException {

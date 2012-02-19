@@ -16,6 +16,8 @@
  */
 package org.apache.coyote.http11.upgrade;
 
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -42,8 +44,8 @@ public class UpgradeBioProcessor extends UpgradeProcessor<Socket> {
 
         socket = wrapper.getSocket();
         
-        this.inputStream = socket.getInputStream();
-        this.outputStream = socket.getOutputStream();
+        this.inputStream = new BufferedInputStream(socket.getInputStream());
+        this.outputStream = new BufferedOutputStream(socket.getOutputStream());
     }
 
 
@@ -74,10 +76,5 @@ public class UpgradeBioProcessor extends UpgradeProcessor<Socket> {
     @Override
     public int read(byte[] bytes) throws IOException {
         return inputStream.read(bytes);
-    }
-    
-    @Override
-    public void close() throws IOException {
-        socket.close();
     }
 }
