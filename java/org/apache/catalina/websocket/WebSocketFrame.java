@@ -166,6 +166,16 @@ public class WebSocketFrame {
 
             return code.array();
         }
+        
+        public static boolean isValid(Long statusCode) {
+            return (// protocol codes
+                    (statusCode >= 1000 && statusCode <= 1011 &&
+                    statusCode != 1004 &&
+                    statusCode != 1005 &&
+                    statusCode != 1006) ||
+                    // application-specific codes
+                    (statusCode >= 3000 && statusCode < 5000));
+        }
 
         @Override
         public String toString() {

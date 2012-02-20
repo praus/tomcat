@@ -157,9 +157,6 @@ public abstract class WebSocketConnection implements UpgradeInbound {
     }
 
     private void analyzeIncomingClose(WebSocketFrame close) throws IOException {
-        // TODO Optionally deal with abnormal status codes
-        // (probably this would be done in WebSocketFrame)
-
         // Close payloads must be empty, or contain status
         // information which is at least two bytes long
         if (close.getPayloadLength() == 1) {
@@ -169,7 +166,8 @@ public abstract class WebSocketConnection implements UpgradeInbound {
         
         Long statusCode = close.decodeStatusCode();
         if (statusCode != null) {
-            if (statusCode < 1000 || statusCode > 4999 || statusCode == 1004) {
+            if (!WebSocketFrame.StatusCode.isValid(statusCode)) {
+                System.out.println("Close code invalid " + statusCode);
                 throw new WebSocketClosedException();
             }
         }
