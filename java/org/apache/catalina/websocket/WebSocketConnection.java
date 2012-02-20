@@ -167,6 +167,12 @@ public abstract class WebSocketConnection implements UpgradeInbound {
             closeImmediately();
         }
         
+        Long statusCode = close.decodeStatusCode();
+        if (statusCode != null) {
+            if (statusCode < 1000 || statusCode > 4999 || statusCode == 1004) {
+                throw new WebSocketClosedException();
+            }
+        }
     }
 
     private void closeImmediately() throws IOException {

@@ -260,6 +260,25 @@ public class WebSocketFrame {
     }
 
     /**
+     * Decodes status
+     * @return 
+     *          Status code of this frame, null if this is not a close frame
+     *          or status code is not defined.
+     * @throws IOException 
+     */
+    public Long decodeStatusCode() throws IOException {
+        if (!opcode.equals(OpCode.ConnectionClose)) {
+            return null;
+        }
+        if (getPayloadLength() >= 2) {
+            byte[] b = readAll(getPayload(), 2);
+            long statusCode = Conversions.byteArrayToLong(b);
+            return statusCode;
+        }
+        return null;
+    }
+    
+    /**
      * Writes this frame to the given stream
      * @param OutputStream the stream to write to
      */
