@@ -16,137 +16,249 @@
  */
 package org.apache.catalina.websocket;
 
-import java.io.CharConversionException;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.Reader;
-import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
-import java.nio.charset.Charset;
-import java.nio.charset.CharsetDecoder;
 
 import org.apache.coyote.http11.upgrade.UpgradeInbound;
-import org.apache.coyote.http11.upgrade.UpgradeOutbound;
-import org.apache.coyote.http11.upgrade.UpgradeProcessor;
 import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
 import org.apache.catalina.websocket.WebSocketFrame.OpCode;
 import org.apache.catalina.websocket.WebSocketFrame.StatusCode;
 
-public abstract class WebSocketConnection implements UpgradeInbound {
-
-    // TODO much better fragmentation system
-    private boolean currentlyFragmented = false;
-    private OpCode currentDataOpcode = null;
-
-    private UpgradeProcessor<?> processor = null;
-    private UpgradeOutbound outbound;
-
-    @Override
-    public void setUpgradeOutbound(UpgradeOutbound upgradeOutbound) {
-        outbound = upgradeOutbound;
-    }
-
-    @Override
-    public void setUpgradeProcessor(UpgradeProcessor<?> processor) {
-        this.processor = processor;
+public abstract class WebSocketConnection extends UpgradeInbound {
+    /**
+     * The possible connection states (matches W3C client API)
+     */
+    public static enum WebSocketState {
+        /**
+         * Connection not yet established
+         */
+        CONNECTING,
+        
+        /**
+         * Bidirectional communication is possible
+         */
+        OPEN,
+        
+        /**
+         * Connection is going through the closing handshake
+         */
+        CLOSING,
+        
+        /**
+         * Connection closed
+         */
+        CLOSED;
     }
     
-    private class WebSocketClosedException extends IOException {
-        private static final long serialVersionUID = 1L;
+    /**
+     * The current connection state (matches W3C client API)
+     */
+    private WebSocketState readyState = WebSocketState.CONNECTING;
+
+    /**
+     * Flag indicating the connection has received the first fragment of a
+     * fragmented message but NOT its final fragment.
+     */
+    private boolean currentlyFragmented = false;
+    // TODO Buffering fragmentation system
+
+    /**
+     * Sends the given frame over this connection (may or may not fragment)
+     * 
+     * @param WebSocketFrame
+     *            the frame to send
+     * @returns true if the frame was sent (false if connection was not open)
+     * @throws IOException
+     */
+    public boolean send(WebSocketFrame frame) throws IOException {
+        // Don't send unless the connection is open
+        if(readyState != WebSocketState.OPEN) {
+            return false;
+        }
+        
+        // All server-to-client messages must not be masked
+        if (frame.isMask()) {
+            frame.toggleMask();
+        }
+
+        // Write to the connector
+        frame.encode(outbound);
+        outbound.flush();
+        return true;
+    }
+    
+    /**
+     * Initiates the closing handshake
+     * @throws IOException
+     */
+    public void close() throws IOException {
+        // Only close if we're open
+        if(readyState != WebSocketState.OPEN) {
+            return;
+        }
+
+        // Send the closing handshake
+        send(WebSocketFrame.makeCloseFrame(StatusCode.NormalClose));
+        readyState = WebSocketState.CLOSING;
+    }
+
+    /**
+     * Called when a message (or message fragment) is received
+     * 
+     * @param WebSocketFrame
+     *            the received frame
+     * @throws IOException
+     */
+    protected abstract void onMessage(WebSocketFrame frame) throws IOException;
+
+    /**
+     * Called after the final fragment of a message is received (subclasses may
+     * override this method)
+     */
+    protected void onFinalFragment() {
+        // Subclasses may override this method
+    }
+
+    /**
+     * Called when the connection is fully open (subclasses may override this
+     * method)
+     */
+    protected void onOpen() {
+        // Subclasses may override this method
+    }
+
+    /**
+     * Called when the connection is closed normally (subclasses may override
+     * this method)
+     */
+    protected void onClose() {
+        // Subclasses may override this method
+    }
+
+    /**
+     * Called when the connection is closed due to error (subclasses may
+     * override this method)
+     */
+    protected void onError() {
+        // Subclasses may override this method
     }
 
     @Override
     public SocketState onData() throws IOException {
-	
-	try {
+        try {
             // Must be the start of a frame
             WebSocketFrame frame = WebSocketFrame.decode(processor);
-    
+
             // Fragmentation
             if (currentlyFragmented) {
                 // This frame is inside a fragmented message
-                
+
                 // Reject non-continuation data frames
-                if(frame.isData()) {
-                    writeFrame(WebSocketFrame.makeCloseFrame(StatusCode.ProtocolError));
-                    closeImmediately();
+                if (frame.isData()) {
+                    send(WebSocketFrame
+                            .makeCloseFrame(StatusCode.ProtocolError));
+                    close(false);
                 }
             } else {
                 // This frame is the first frame of a new message
-                
+
                 // Reject spurious continuation frames
                 if (frame.getOpcode() == OpCode.Continuation) {
-                    writeFrame(WebSocketFrame.makeCloseFrame(StatusCode.ProtocolError));
-                    closeImmediately();
+                    send(WebSocketFrame
+                            .makeCloseFrame(StatusCode.ProtocolError));
+                    close(false);
                 }
             }
-            
+
             // Route the frame
             if (frame.isData() || frame.getOpcode() == OpCode.Continuation) {
-        	
+
                 handleDataFrame(frame);
-                
+
                 // Update fragmentation state for next time
-                if(frame.isFin()) {
+                if (frame.isFin()) {
                     currentlyFragmented = false;
-                } else if(currentlyFragmented == false) {
+                    onFinalFragment();
+                } else if (currentlyFragmented == false) {
                     currentlyFragmented = true;
-                    currentDataOpcode = frame.getOpcode();
                 }
             } else if (frame.isControl()) {
                 handleControl(frame);
             }
-            
-	} catch(CharacterCodingException e) {
-	    // Payload contained invalid character data
-	    writeFrame(WebSocketFrame.makeCloseFrame(StatusCode.InvalidData));
-	    
-	} catch(WebSocketClosedException c) {
-	    // This tells the protocol above to drop the TsCP
-	    return SocketState.CLOSED;
-	}
+
+        } catch (CharacterCodingException e) {
+            // Payload contained invalid character data
+            send(WebSocketFrame.makeCloseFrame(StatusCode.InvalidData));
+            readyState = WebSocketState.CLOSED;
+            onError();
+            return SocketState.CLOSED;
+        } catch (WebSocketClosedException c) {
+            // Tell the protocol above to drop the TCP
+            return SocketState.CLOSED;
+        }
+
         // TODO per-frame extension handling is not currently supported.
 
         return SocketState.UPGRADED;
     }
     
+    /**
+     * @returns the current WebSocket state of this connection
+     */
+    public WebSocketState getReadyState() {
+        return readyState;
+    }
+
+    private void handleDataFrame(WebSocketFrame frame) throws IOException {
+        onMessage(frame);
+    }
+
     private void handleControl(WebSocketFrame frame) throws IOException {
         // Control frames must not be fragmented
         if (frame.isFin() == false) {
-            writeFrame(WebSocketFrame.makeCloseFrame(StatusCode.ProtocolError));
-            closeImmediately();
+            send(WebSocketFrame.makeCloseFrame(StatusCode.ProtocolError));
+            close(false);
         }
 
         // Control frames must not have extended length
         if (frame.getPayloadLength() > 125) {
-            writeFrame(WebSocketFrame.makeCloseFrame(StatusCode.ProtocolError));
-            closeImmediately();
+            send(WebSocketFrame.makeCloseFrame(StatusCode.ProtocolError));
+            close(false);
         }
 
         switch (frame.getOpcode()) {
         case Ping:
-            System.out.println("<ping />");
-            writeFrame(WebSocketFrame.makePong(frame));
+            //System.out.println("<ping />");
+            send(WebSocketFrame.makePong(frame));
             break;
         case Pong:
-            System.out.println("<pong />");
+            //System.out.println("<pong />");
             swallowFrame(frame);
             break;
         case ConnectionClose:
             // Analyze the closing frame
             analyzeIncomingClose(frame);
+
+            // Are we expecting a closing reply?
+            if(readyState == WebSocketState.CLOSING) {
+                // Handshake complete
+                close(true);
+            }
             
             // Reply with a close
-            writeFrame(WebSocketFrame.closeFrame());
-            closeImmediately();
+            send(WebSocketFrame.closeFrame());
+            close(true);
             break;
         }
     }
-    
+
     /**
      * Reads the payload of the given frame, and ignores it
-     * @param WebSocketFrame the frame to swallow
-     * @throws IOException 
+     * 
+     * @param WebSocketFrame
+     *            the frame to swallow
+     * @throws IOException
      */
     private void swallowFrame(WebSocketFrame frame) throws IOException {
         // Grab the frame's payload
@@ -160,50 +272,39 @@ public abstract class WebSocketConnection implements UpgradeInbound {
         // Close payloads must be empty, or contain status
         // information which is at least two bytes long
         if (close.getPayloadLength() == 1) {
-            writeFrame(WebSocketFrame.makeCloseFrame(StatusCode.ProtocolError));
-            closeImmediately();
+            send(WebSocketFrame.makeCloseFrame(StatusCode.ProtocolError));
+            close(false);
         }
-        
+
         Long statusCode = close.decodeStatusCode();
         if (statusCode != null) {
             if (!WebSocketFrame.StatusCode.isValid(statusCode)) {
-                System.out.println("Close code invalid " + statusCode);
-                throw new WebSocketClosedException();
+                //System.out.println("Close code invalid " + statusCode);
+                close(false);
             }
         }
     }
 
-    private void closeImmediately() throws IOException {
+    private void close(boolean normalClose) throws IOException {
+        readyState = WebSocketState.CLOSED;
+        if(normalClose) {
+            onClose();
+        } else {
+            onError();
+        }
         throw new WebSocketClosedException();
     }
 
-    public void writeFrame(WebSocketFrame frame) throws IOException {
-        frame.encode(outbound);
-        outbound.flush();
+    /**
+     * This allows to determine when the upgrade is complete
+     */
+    @Override
+    public void onUpgradeComplete() {
+        readyState = WebSocketState.OPEN;
+        onOpen();
     }
-
-    private void handleDataFrame(WebSocketFrame frame) throws IOException {
-        OpCode opcode = frame.getOpcode();
-        
-        if(opcode == OpCode.Continuation) {
-            opcode = currentDataOpcode;
-        }
-        
-        switch (opcode) {
-        case Text:
-            onTextData(frame);
-            break;
-
-        case Binary:
-            onBinaryData(frame);
-            break;
-        }
+    
+    protected class WebSocketClosedException extends IOException {
+        private static final long serialVersionUID = 1L;
     }
-
-    protected abstract void onTextData(WebSocketFrame frame) throws IOException;
-
-    protected abstract void onBinaryData(WebSocketFrame frame)
-            throws IOException;
-
-    protected abstract void endOfMessage();
 }

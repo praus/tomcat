@@ -17,7 +17,6 @@
 package websocket;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.Reader;
 
 import org.apache.catalina.websocket.WebSocketConnection;
@@ -37,10 +36,10 @@ public class EchoMessage extends WebSocketServlet {
 	private final class PrintMessageConnection extends WebSocketConnection
 	{
         @Override
-        protected void onTextData(WebSocketFrame frame) throws IOException {
+        protected void onMessage(WebSocketFrame frame) throws IOException {
             Reader payload = frame.getPayloadReader();
 
-            System.out.print("<message opcode=\"text\">");
+            System.out.print("<message opcode=\"" + frame.getOpcode() + "\">");
             
             int i;
             while((i = payload.read()) != -1)
@@ -48,24 +47,10 @@ public class EchoMessage extends WebSocketServlet {
                 System.out.print((char) i);
             }
         }
-
+   
         @Override
-        protected void onBinaryData(WebSocketFrame frame) throws IOException {
-            InputStream payload = frame.getPayload();
-
-            System.out.println("<message opcode=\"binary\">");
-            
-            int i;
-            while((i = payload.read()) != -1)
-            {
-                System.out.print((char) i);
-            }
-        }
-
-        @Override
-        protected void endOfMessage() {
+        protected void onFinalFragment() {
             System.out.println("</message>");
         }
-	    
 	}
 }

@@ -41,23 +41,12 @@ public class TestWebSocket extends TomcatBaseTest {
     }
 
     private static final class SimpleConnection extends WebSocketConnection {
-        
-        @Override
-        protected void onTextData(WebSocketFrame frame) throws IOException {
-            // TODO Auto-generated method stub
-            
-        }
 
         @Override
-        protected void onBinaryData(WebSocketFrame frame) throws IOException {
+        protected void onMessage(WebSocketFrame frame) throws IOException {
             // TODO Auto-generated method stub
             
         }
         
-        @Override
-        protected void endOfMessage() {
-            // TODO Auto-generated method stub
-            
-        }
     }
 }

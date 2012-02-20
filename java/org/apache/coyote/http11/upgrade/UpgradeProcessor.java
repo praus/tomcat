@@ -38,6 +38,7 @@ public abstract class UpgradeProcessor<S> implements Processor<S> {
         this.upgradeInbound = upgradeInbound;
         upgradeInbound.setUpgradeProcessor(this);
         upgradeInbound.setUpgradeOutbound(new UpgradeOutbound(this));
+        upgradeInbound.onUpgradeComplete();
     }
 
     // Output methods

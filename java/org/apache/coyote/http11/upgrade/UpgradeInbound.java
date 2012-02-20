@@ -24,11 +24,22 @@ import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
  * Receives notification that there is data to be read on the upgraded
  * connection and processes it.
  */
-public interface UpgradeInbound {
+public abstract class UpgradeInbound {
 
-    void setUpgradeProcessor(UpgradeProcessor<?> processor);
+    protected UpgradeProcessor<?> processor = null;
+    protected UpgradeOutbound outbound;
+    
+    public abstract SocketState onData() throws IOException;
+    
+    public void onUpgradeComplete() {
+        // Subclasses may override this method to catch the event
+    }
+    
+    public void setUpgradeOutbound(UpgradeOutbound upgradeOutbound) {
+        outbound = upgradeOutbound;
+    }
 
-    SocketState onData() throws IOException;
-
-    void setUpgradeOutbound(UpgradeOutbound upgradeOutbound);
+    public void setUpgradeProcessor(UpgradeProcessor<?> processor) {
+        this.processor = processor;
+    }
 }

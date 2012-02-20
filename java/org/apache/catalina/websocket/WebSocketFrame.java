@@ -419,8 +419,6 @@ public class WebSocketFrame {
      *            whether FIN bit should be set
      * @param opcode
      *            type of frame
-     * @param mask
-     *            whether this frame is masked
      * @param payload
      *            the byte array containing the payload
      */
@@ -429,6 +427,26 @@ public class WebSocketFrame {
         this.mask = false;
         this.opcode = opcode;
         setPayload(payload);
+    }
+    
+    /**
+     * Constructor for frames with unmasked payload
+     * 
+     * @param fin
+     *            whether FIN bit should be set
+     * @param opcode
+     *            type of frame
+     * @param payload
+     *            the stream containing the payload (must be finite)
+     * @param payloadLength
+     *            the length of the payload
+     */
+    public WebSocketFrame(boolean fin, OpCode opcode,
+            InputStream payload, long payloadLength) {
+        this.fin = fin;
+        this.mask = false;
+        this.opcode = opcode;
+        setPayload(payload, payloadLength);
     }
     
     @Override

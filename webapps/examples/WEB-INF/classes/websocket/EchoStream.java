@@ -28,39 +28,35 @@ public class EchoStream extends WebSocketServlet {
 
     @Override
     protected WebSocketConnection createWebSocketConnection() {
-	// Create a connection that echoes back anything it receives
-	return new EchoStreamConnection();
+        // Create a connection that echoes back anything it receives
+        return new EchoStreamConnection();
     }
 
     private final class EchoStreamConnection extends WebSocketConnection {
-	@Override
-	protected void onTextData(WebSocketFrame frame) throws IOException {
-	    System.out.println("<message opcode=\"text\" len=\""
-		    + frame.getPayloadLength() + "\" />");
-
-	    // Toggle the masking flag
-	    frame.toggleMask();
-
-	    // Echo the frame right back
-	    writeFrame(frame);
-	}
-
-	@Override
-	protected void onBinaryData(WebSocketFrame frame) throws IOException {
-	    System.out.println("<message opcode=\"text\" len=\""
-		    + frame.getPayloadLength() + "\" />");
-
-	    // Toggle the masking flag
-	    frame.toggleMask();
-
-	    // Echo the frame right back
-	    writeFrame(frame);
-	}
-
-	@Override
-	protected void endOfMessage() {
-	    // That was the final fragment
-	}
-
+//        @Override
+//        protected void onOpen() {
+//            
+//        }
+        
+        @Override
+        protected void onMessage(WebSocketFrame frame) throws IOException {
+            // Echo the frame right back
+            send(frame);
+        }
+        
+//        @Override
+//        protected void onFinalFragment() {
+//            
+//        }
+//        
+//        @Override
+//        protected void onClose() {
+//            
+//        }
+//        
+//        @Override
+//        protected void onError() {
+//            
+//        }
     }
 }
