@@ -57,16 +57,16 @@ public class MaskingStream extends InputStream {
      * @throws IllegalArgumentException
      */
     public MaskingStream(InputStream streamToMask, byte[] maskingKey) {
-	input = streamToMask;
-
-	if (maskingKey == null || maskingKey.length != maskingKeyLength) {
-	    throw new IllegalArgumentException("invalid masking key");
-	}
-
-	// Convert the mask to unsigned integer
-	for(int i = 0; i < maskingKeyLength; ++i) {
-	    mask[i] = (maskingKey[i] & 0xff);
-	}
+    	input = streamToMask;
+    
+    	if (maskingKey == null || maskingKey.length != maskingKeyLength) {
+    	    throw new IllegalArgumentException("invalid masking key");
+    	}
+    
+    	// Convert the mask to unsigned integer
+    	for(int i = 0; i < maskingKeyLength; ++i) {
+    	    mask[i] = (maskingKey[i] & 0xff);
+    	}
     }
 
     /**
@@ -74,15 +74,15 @@ public class MaskingStream extends InputStream {
      */
     @Override
     public int read() throws IOException {
-	// Read the next byte and check for end of stream
-	int nextByte = input.read();
-	if (nextByte == -1) {
-	    return -1;
-	}
-
-	// Advance to the next place in the mask
-	position = (position + 1) & maskingKeyBits;
-
-	return (nextByte ^ mask[position]);
+    	// Read the next byte and check for end of stream
+    	int nextByte = input.read();
+    	if (nextByte == -1) {
+    	    return -1;
+    	}
+    
+    	// Advance to the next place in the mask
+    	position = (position + 1) & maskingKeyBits;
+    
+    	return (nextByte ^ mask[position]);
     }
 }

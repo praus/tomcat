@@ -72,8 +72,8 @@ public class WebSocketFrame {
      * The character set decoder should report errors
      */
     static {
-	charsetDecoder.onUnmappableCharacter(CodingErrorAction.REPORT);
-	charsetDecoder.onMalformedInput(CodingErrorAction.REPORT);
+        charsetDecoder.onUnmappableCharacter(CodingErrorAction.REPORT);
+        charsetDecoder.onMalformedInput(CodingErrorAction.REPORT);
     }
     
     /**
@@ -345,8 +345,8 @@ public class WebSocketFrame {
      * @return closing frame
      */
     public static WebSocketFrame makeCloseFrame(StatusCode statusCode) {
-	return new WebSocketFrame(true, OpCode.ConnectionClose,
-		statusCode.encode());
+        return new WebSocketFrame(true, OpCode.ConnectionClose,
+    		statusCode.encode());
     }
 
     /**
@@ -472,8 +472,7 @@ public class WebSocketFrame {
         this.maskingKey = maskingKey;
     }
     
-    private void maskPayload()
-    {
+    private void maskPayload() {
         payload = new MaskingStream(payload, maskingKey);
     }
     
@@ -488,7 +487,10 @@ public class WebSocketFrame {
         return payload;
     }
     
-    public Reader readPayload() {
+    /**
+     * @return payload reader with UTF-8 decoding
+     */
+    public Reader getPayloadReader() {
         return new InputStreamReader(payload, charsetDecoder);
     }
     

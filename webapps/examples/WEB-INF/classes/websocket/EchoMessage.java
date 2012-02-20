@@ -38,7 +38,7 @@ public class EchoMessage extends WebSocketServlet {
 	{
         @Override
         protected void onTextData(WebSocketFrame frame) throws IOException {
-            Reader payload = frame.readPayload();
+            Reader payload = frame.getPayloadReader();
 
             System.out.print("<message opcode=\"text\">");
             

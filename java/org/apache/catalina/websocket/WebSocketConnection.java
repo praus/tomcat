@@ -16,9 +16,14 @@
  */
 package org.apache.catalina.websocket;
 
+import java.io.CharConversionException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.Reader;
+import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
+import java.nio.charset.Charset;
+import java.nio.charset.CharsetDecoder;
 
 import org.apache.coyote.http11.upgrade.UpgradeInbound;
 import org.apache.coyote.http11.upgrade.UpgradeOutbound;
@@ -47,7 +52,7 @@ public abstract class WebSocketConnection implements UpgradeInbound {
     }
     
     private class WebSocketClosedException extends IOException {
-	private static final long serialVersionUID = 1L;
+        private static final long serialVersionUID = 1L;
     }
 
     @Override
@@ -99,9 +104,7 @@ public abstract class WebSocketConnection implements UpgradeInbound {
 	} catch(WebSocketClosedException c) {
 	    // This tells the protocol above to drop the TsCP
 	    return SocketState.CLOSED;
-	    
 	}
-        
         // TODO per-frame extension handling is not currently supported.
 
         return SocketState.UPGRADED;
@@ -146,27 +149,28 @@ public abstract class WebSocketConnection implements UpgradeInbound {
      * @throws IOException 
      */
     private void swallowFrame(WebSocketFrame frame) throws IOException {
-	// Grab the frame's payload
-	InputStream payload = frame.getPayload();
-	
-	// Swallow the stream
-	while((payload.read()) >= 0);
+        // Grab the frame's payload
+        InputStream payload = frame.getPayload();
+
+        // Swallow the stream
+        while (payload.read() >= 0);
     }
 
     private void analyzeIncomingClose(WebSocketFrame close) throws IOException {
-	// TODO Optionally deal with abnormal status codes
-	// (probably this would be done in WebSocketFrame)
-	
-	// Close payloads must be empty, or contain status
-	// information which is at least two bytes long
-	if(close.getPayloadLength() == 1) {
-	    writeFrame(WebSocketFrame.makeCloseFrame(StatusCode.ProtocolError));
-	    closeImmediately();
-	}
+        // TODO Optionally deal with abnormal status codes
+        // (probably this would be done in WebSocketFrame)
+
+        // Close payloads must be empty, or contain status
+        // information which is at least two bytes long
+        if (close.getPayloadLength() == 1) {
+            writeFrame(WebSocketFrame.makeCloseFrame(StatusCode.ProtocolError));
+            closeImmediately();
+        }
+        
     }
 
     private void closeImmediately() throws IOException {
-	throw new WebSocketClosedException();
+        throw new WebSocketClosedException();
     }
 
     public void writeFrame(WebSocketFrame frame) throws IOException {
