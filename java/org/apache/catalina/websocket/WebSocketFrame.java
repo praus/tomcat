@@ -541,6 +541,14 @@ public class WebSocketFrame {
         return new InputStreamReader(payload, charsetDecoder);
     }
     
+    /**
+     * @returns the payload as a byte array (must check length first)
+     * @throws IOException
+     */
+    public byte[] getPayloadArray() throws IOException {
+        return readAll(payload, (int) (payloadLength));
+    }
+    
     public void setPayload(FiniteStream newPayload) {
         payloadLength = newPayload.remaining();
         payload = newPayload;

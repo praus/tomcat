@@ -1,0 +1,187 @@
+<!--
+  Licensed to the Apache Software Foundation (ASF) under one or more
+  contributor license agreements.  See the NOTICE file distributed with
+  this work for additional information regarding copyright ownership.
+  The ASF licenses this file to You under the Apache License, Version 2.0
+  (the "License"); you may not use this file except in compliance with
+  the License.  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<!DOCTYPE html>
+<html>
+<head>
+  <title>HTML5 Chat Demo</title>
+  <style type="text/css">
+  .ours {
+      color: #0000ff;
+  }
+  .theirs {
+      color: #ff0000;
+  }
+  .system {
+      color: #333333;
+      font-style: italic;
+  }
+  </style>
+  <script type="text/javascript">
+    // the websocket object
+    var websocket;
+
+    // our chat handle
+    var handle = "";
+
+    // the address of the websocket server
+    var server = "ws://localhost:8080/examples/websocket/chat";
+
+
+    function init()
+    {
+        // disable buttons
+        $('send').disabled = true;
+        $('disconnect').disabled = true;
+        $('connect').disabled = true;
+        $('message').disabled = true;
+
+        // test for websocket support
+        if ("WebSocket" in window) {
+            $('connect').disabled = false;
+            console("system|Your browser appears to support WebSockets!");
+            console("system|Click \"Connect\" to attempt connection");
+
+            // connect handler
+            $('connect').onclick = function() {
+                if (!$('handle').value) {
+                    alert('Please enter a chat handle');
+                    return;
+                }
+                handle = $('handle').value;
+                console("system|connecting to "+server);
+
+                // creating a WebSocket object causes it
+                // to connect to the server
+                websocket = new WebSocket(server);
+
+                // called once the connection is established
+                websocket.onopen = function(evt) {
+                    console("system|CONNECTED");
+                    $('connect').disabled = true;
+                    $('disconnect').disabled = false;
+                    $('send').disabled = false;
+                    $('message').disabled = false;
+                    $('handle').disabled = true;
+                    // broadcast that we've connected
+                    websocket.send("system|"+handle+" connected");
+                };
+
+                // called upon receipt of a message
+                websocket.onmessage = function(evt) {
+                    console(evt.data);
+                };
+
+                // called when an error occurs
+                websocket.onerror = function(evt) {
+                    console("system|websocket error: "+evt.data);
+                };
+
+                // called when the connection is closed (by either side)
+                websocket.onclose = function() {
+                    console("system|DISCONNECTED");
+                    $('connect').disabled = false;
+                    $('disconnect').disabled = true;
+                    $('send').disabled = true;
+                    $('message').disabled = true;
+                    $('handle').disabled = false;
+                };
+            };
+
+        } else { // no websocket support
+            $('error').innerHTML = "Your browser does not appear to support WebSockets";
+        }
+
+        // send message handler
+        send.onclick = function() {
+            websocket.send(handle+"|"+$('message').value);
+            $('message').value = "";
+            $('message').focus();
+        };
+
+        // disconnect handler
+        $('disconnect').onclick = function() {
+            // broadcast that we've left the chat
+            websocket.send("system|"+handle+" disconnected");
+            // close the connection
+            websocket.close();
+        };
+    }
+
+    // helper function
+    function $(id){ return document.getElementById(id); }
+
+    // function to display status and message output
+    function console(message)
+    {
+        // normal messages are of the form "handle|text"
+        var msg = message.split("|",2);
+        var msg_text = (msg.length > 1) ? msg[1] : msg[0];
+        var msg_handle = (msg.length > 1) ? msg[0] : "";
+
+        var pre = document.createElement("pre");
+        pre.style.wordWrap = "break-word";
+        pre.style.padding = "0 5px";
+        pre.style.margin = "0";
+        pre.innerHTML = msg_text;
+
+        // "system" messages
+        if (msg_handle == "system") {
+            pre.className = "system";
+            msg_handle = "";
+        }
+
+        // did we receive a handle?
+        if (msg_handle.length > 0) {
+            // if so, then prepend the handle to the message content
+            var h = document.createElement("span");
+            h.innerHTML = msg_handle + ": ";
+
+            // is it ours or theirs
+            if (msg_handle == handle) {
+                h.className = "ours";
+            } else {
+                h.className = "theirs";
+            }
+            pre.insertBefore(h, pre.firstChild);
+        }
+        // add the new message at the end
+        $('console').appendChild(pre);
+
+        // scroll to bottom of console
+        $('console').scrollTop = $('console').scrollHeight;
+    }
+
+  </script>
+<body onload="init()">
+
+<h3>HTML 5 Chat Demo</h3>
+
+<h4 id="error" style="color:#ff0000"></h4>
+<div>
+    <div id="console" style="height:300px; overflow:scroll; border:1px solid black"></div>
+</div>
+<div style="padding-top:10px">
+    <label>Handle:</label><input id="handle" size="25" value="">
+    <button id="connect">Connect</button>
+    <button id="disconnect">Disconnect</button><br>
+    <label>Message:</label><input id="message" size="25" value="">
+    <button id="send">Send</button>
+</div>
+
+
+</body>
+</html>

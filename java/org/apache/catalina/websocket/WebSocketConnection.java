@@ -68,12 +68,14 @@ public abstract class WebSocketConnection extends UpgradeInbound {
      * 
      * @param WebSocketFrame
      *            the frame to send
-     * @returns true if the frame was sent (false if connection was not open)
+     * @returns true if the frame was sent (false if the connection
+     *              was not open, in which case the frame is swallowed)
      * @throws IOException
      */
     public boolean send(WebSocketFrame frame) throws IOException {
         // Don't send unless the connection is open
         if(readyState != WebSocketState.OPEN) {
+            swallowFrame(frame);
             return false;
         }
         
@@ -129,8 +131,8 @@ public abstract class WebSocketConnection extends UpgradeInbound {
     }
 
     /**
-     * Called when the connection is closed normally (subclasses may override
-     * this method)
+     * Called when the connection is closed
+     * (subclasses may override this method)
      */
     protected void onClose() {
         // Subclasses may override this method
@@ -158,7 +160,8 @@ public abstract class WebSocketConnection extends UpgradeInbound {
                 if (frame.isData()) {
                     send(WebSocketFrame
                             .makeCloseFrame(StatusCode.ProtocolError));
-                    close(false);
+                    onError();
+                    closeImmediately();
                 }
             } else {
                 // This frame is the first frame of a new message
@@ -167,7 +170,8 @@ public abstract class WebSocketConnection extends UpgradeInbound {
                 if (frame.getOpcode() == OpCode.Continuation) {
                     send(WebSocketFrame
                             .makeCloseFrame(StatusCode.ProtocolError));
-                    close(false);
+                    onError();
+                    closeImmediately();
                 }
             }
 
@@ -193,6 +197,7 @@ public abstract class WebSocketConnection extends UpgradeInbound {
             readyState = WebSocketState.CLOSED;
             onError();
             return SocketState.CLOSED;
+            
         } catch (WebSocketClosedException c) {
             // Tell the protocol above to drop the TCP
             return SocketState.CLOSED;
@@ -218,13 +223,15 @@ public abstract class WebSocketConnection extends UpgradeInbound {
         // Control frames must not be fragmented
         if (frame.isFin() == false) {
             send(WebSocketFrame.makeCloseFrame(StatusCode.ProtocolError));
-            close(false);
+            onError();
+            closeImmediately();
         }
 
         // Control frames must not have extended length
         if (frame.getPayloadLength() > 125) {
             send(WebSocketFrame.makeCloseFrame(StatusCode.ProtocolError));
-            close(false);
+            onError();
+            closeImmediately();
         }
 
         switch (frame.getOpcode()) {
@@ -243,12 +250,12 @@ public abstract class WebSocketConnection extends UpgradeInbound {
             // Are we expecting a closing reply?
             if(readyState == WebSocketState.CLOSING) {
                 // Handshake complete
-                close(true);
+                closeImmediately();
             }
             
             // Reply with a close
             send(WebSocketFrame.closeFrame());
-            close(true);
+            closeImmediately();
             break;
         }
     }
@@ -273,25 +280,27 @@ public abstract class WebSocketConnection extends UpgradeInbound {
         // information which is at least two bytes long
         if (close.getPayloadLength() == 1) {
             send(WebSocketFrame.makeCloseFrame(StatusCode.ProtocolError));
-            close(false);
+            onError();
+            closeImmediately();
         }
 
         Long statusCode = close.decodeStatusCode();
         if (statusCode != null) {
             if (!WebSocketFrame.StatusCode.isValid(statusCode)) {
                 //System.out.println("Close code invalid " + statusCode);
-                close(false);
+                onError();
+                closeImmediately();
             }
         }
     }
 
-    private void close(boolean normalClose) throws IOException {
+    /**
+     * Drops the underlying TCP connection
+     * @throws IOException
+     */
+    private void closeImmediately() throws IOException {
         readyState = WebSocketState.CLOSED;
-        if(normalClose) {
-            onClose();
-        } else {
-            onError();
-        }
+        onClose();
         throw new WebSocketClosedException();
     }
 
