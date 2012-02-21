@@ -95,6 +95,12 @@ public abstract class WebSocketConnection extends UpgradeInbound {
      * @throws IOException
      */
     public void close() throws IOException {
+        // Have we even finished connecting?
+        if(readyState == WebSocketState.CONNECTING) {
+            readyState = WebSocketState.CLOSED;
+            throw new WebSocketClosedException();
+        }
+        
         // Only close if we're open
         if(readyState != WebSocketState.OPEN) {
             return;
@@ -191,16 +197,14 @@ public abstract class WebSocketConnection extends UpgradeInbound {
                 handleControl(frame);
             }
 
-        } catch (CharacterCodingException e) {
-            // Payload contained invalid character data
-            send(WebSocketFrame.makeCloseFrame(StatusCode.InvalidData));
-            readyState = WebSocketState.CLOSED;
-            onError();
+        } catch (WebSocketClosedException c) {
+            onClose();
             return SocketState.CLOSED;
             
-        } catch (WebSocketClosedException c) {
-            // Tell the protocol above to drop the TCP
+        } catch (IOException e) {
+            onClose();
             return SocketState.CLOSED;
+            
         }
 
         // TODO per-frame extension handling is not currently supported.
@@ -267,7 +271,7 @@ public abstract class WebSocketConnection extends UpgradeInbound {
      *            the frame to swallow
      * @throws IOException
      */
-    private void swallowFrame(WebSocketFrame frame) throws IOException {
+    protected void swallowFrame(WebSocketFrame frame) throws IOException {
         // Grab the frame's payload
         InputStream payload = frame.getPayload();
 
@@ -300,7 +304,6 @@ public abstract class WebSocketConnection extends UpgradeInbound {
      */
     private void closeImmediately() throws IOException {
         readyState = WebSocketState.CLOSED;
-        onClose();
         throw new WebSocketClosedException();
     }
 

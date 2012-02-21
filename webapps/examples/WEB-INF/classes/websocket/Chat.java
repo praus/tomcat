@@ -17,7 +17,6 @@
 package websocket;
 
 import java.io.IOException;
-import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
 
@@ -48,20 +47,18 @@ public class Chat extends WebSocketServlet {
         
         @Override
         protected void onMessage(WebSocketFrame frame) throws IOException {
-            
             // There may be some clever way to fork input streams in
             // a 1) single-threaded and 2) blocking environment, but I
-            // haven't discovered it yet. For now, we'll assume that
+            // haven't discovered it yet. For now, we'll require that
             // people only send reasonable-sized chat messages.
             if(frame.getPayloadLength() > maxMessageSize) {
-                System.out.println("Payload too big for a chat message");
+                System.err.println("Payload too big for a chat message");
+                swallowFrame(frame);
                 close();
             }
             
             // Pull the payload into a byte array
             byte[] payload = frame.getPayloadArray();
-            
-            //System.out.println(Arrays.toString(payload));
             
             for(WebSocketConnection connection : connections) {
                 frame.setPayload(payload);
