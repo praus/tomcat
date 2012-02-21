@@ -18,7 +18,6 @@ package org.apache.catalina.websocket;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.CharacterCodingException;
 
 import org.apache.coyote.http11.upgrade.UpgradeInbound;
 import org.apache.tomcat.util.net.AbstractEndpoint.Handler.SocketState;
